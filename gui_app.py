@@ -12,7 +12,7 @@ from collections import Counter
 from dataclasses import replace
 from pathlib import Path
 
-from PySide6.QtCore import QDate, QDateTime, QProcess, QRectF, QSettings, QSignalBlocker, QTime, QTimer, Qt, QUrl
+from PySide6.QtCore import QDate, QDateTime, QLocale, QProcess, QRectF, QSettings, QSignalBlocker, QTime, QTimer, Qt, QUrl
 from PySide6.QtGui import QAction, QColor, QDesktopServices, QFont, QPainter
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
@@ -67,7 +67,55 @@ from app_config import (
 
 
 ROOT = Path(__file__).resolve().parent
-APP_NAME = "3D轨迹影片生成器"
+APP_NAMES = {
+    "zh": "3D轨迹影片生成器",
+    "en": "3D Track Movie Generator",
+}
+
+
+def system_language(locale_name: str | None = None) -> str:
+    """Return the supported UI language for a Qt/system locale name."""
+
+    if locale_name is None:
+        system_locale = QLocale.system()
+        ui_languages = system_locale.uiLanguages()
+        name = ui_languages[0] if ui_languages else system_locale.name()
+    else:
+        name = locale_name
+    return "zh" if name.lower().replace("-", "_").startswith("zh") else "en"
+
+
+def ui_text(language: str, chinese: str, english: str) -> str:
+    return chinese if language == "zh" else english
+
+
+ERROR_TRANSLATIONS = {
+    "影片文件名无效": "The video filename is invalid.",
+    "起点不能小于 0": "The start time cannot be less than 0.",
+    "终点必须晚于起点": "The end time must be later than the start time.",
+    "请填写拍摄时间": "Enter the recording time.",
+    "拍摄时间应写成 YYYY-MM-DD HH:MM:SS": "Use YYYY-MM-DD HH:MM:SS for the recording time.",
+    "时间应写成 MM:SS 或 HH:MM:SS": "Use MM:SS or HH:MM:SS for the time.",
+    "无法识别这个时间": "The time could not be parsed.",
+    "时间不能小于 0": "The time cannot be less than 0.",
+    "秒和分钟不能大于等于 60": "Seconds and minutes must be less than 60.",
+    "请选择有效的 FIT 或 KML 轨迹文件": "Select a valid FIT or KML track file.",
+    "请填写活动名称": "Enter an activity name.",
+    "影片时长必须大于 0": "The movie duration must be greater than 0.",
+    "不支持的画面方向或输出画质": "The selected orientation or output quality is not supported.",
+}
+
+
+def localized_error(language: str, error: Exception | str) -> str:
+    message = str(error)
+    if language == "zh":
+        return message
+    if message in ERROR_TRANSLATIONS:
+        return ERROR_TRANSLATIONS[message]
+    line_match = re.fullmatch(r"第 (\d+) 行格式错误", message)
+    if line_match:
+        return f"Line {line_match.group(1)} has an invalid format."
+    return message
 
 
 def probe_video_creation_time(path: Path) -> str | None:
@@ -170,15 +218,23 @@ class ChoiceButtons(QWidget):
         button = self.group.checkedButton()
         return str(button.property("choiceValue"))
 
+    def set_value(self, value: str) -> None:
+        for button in self.group.buttons():
+            button.setChecked(str(button.property("choiceValue")) == value)
+
 
 class OptionalDateTimeEdit(QDateTimeEdit):
     """A calendar-backed date/time picker with a genuine unselected state."""
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, *, language: str = "zh"):
         super().__init__(parent)
         self.empty_value = QDateTime(QDate(1900, 1, 1), QTime(0, 0, 0))
         self.setMinimumDateTime(self.empty_value)
-        self.setSpecialValueText("\u8bf7\u9009\u62e9\u62cd\u6444\u65e5\u671f\u548c\u65f6\u95f4")
+        self.setSpecialValueText(ui_text(
+            language,
+            "\u8bf7\u9009\u62e9\u62cd\u6444\u65e5\u671f\u548c\u65f6\u95f4",
+            "Select the recording date and time",
+        ))
         self.setDateTime(self.empty_value)
         self.setCalendarPopup(True)
 
@@ -306,9 +362,15 @@ class SegmentTimelineSlider(QSlider):
 
 
 class ClipEditorDialog(QDialog):
-    def __init__(self, media_directory: Path, segments: list[Segment], parent=None):
+    def __init__(
+        self, media_directory: Path, segments: list[Segment], parent=None, *, language: str = "zh"
+    ):
         super().__init__(parent)
-        self.setWindowTitle(f"编辑影片片段 - {APP_NAME}")
+        self.language = language
+        self.setWindowTitle(self.t(
+            f"编辑影片片段 - {APP_NAMES['zh']}",
+            f"Edit Video Clips - {APP_NAMES['en']}",
+        ))
         self.resize(1120, 760)
         self.media_directory = media_directory
         self.segments = list(segments)
@@ -325,8 +387,12 @@ class ClipEditorDialog(QDialog):
 
         root = QVBoxLayout(self)
         intro = QLabel(
-            "选择影片，修正影片开始拍摄时间，再定位起点和终点；"
-            "同一影片可以添加多个片段。"
+            self.t(
+                "选择影片，修正影片开始拍摄时间，再定位起点和终点；"
+                "同一影片可以添加多个片段。",
+                "Choose a video, correct its recording start time, then mark the start "
+                "and end points. You can add multiple clips from one video.",
+            )
         )
         intro.setStyleSheet("color:#5f6870; padding:3px 0 7px 0;")
         root.addWidget(intro)
@@ -338,7 +404,10 @@ class ClipEditorDialog(QDialog):
         left = QWidget()
         left_layout = QVBoxLayout(left)
         left_layout.setContentsMargins(0, 0, 5, 0)
-        left_layout.addWidget(QLabel(f"影片列表（{len(self.video_files)}）"))
+        left_layout.addWidget(QLabel(self.t(
+            f"影片列表（{len(self.video_files)}）",
+            f"Videos ({len(self.video_files)})",
+        )))
         self.file_list = QListWidget()
         left_layout.addWidget(self.file_list, 1)
         splitter.addWidget(left)
@@ -353,17 +422,26 @@ class ClipEditorDialog(QDialog):
         right_layout.addWidget(self.video_widget, 3)
 
         creation_row = QHBoxLayout()
-        self.creation_time_edit = OptionalDateTimeEdit()
+        self.creation_time_edit = OptionalDateTimeEdit(language=self.language)
         self.creation_time_edit.setDisplayFormat("yyyy-MM-dd HH:mm:ss")
         self.creation_time_edit.setCalendarPopup(True)
         self.creation_time_edit.setKeyboardTracking(False)
-        self.creation_time_edit.lineEdit().setPlaceholderText("请选择拍摄日期和时间")
+        self.creation_time_edit.lineEdit().setPlaceholderText(self.t(
+            "请选择拍摄日期和时间", "Select the recording date and time"
+        ))
         self.creation_time_edit.setToolTip(
-            "选择原始影片第 0 秒的本地拍摄日期和时间"
+            self.t(
+                "选择原始影片第 0 秒的本地拍摄日期和时间",
+                "Select the local date and time at second 0 of the source video",
+            )
         )
-        self.apply_creation_time_button = QPushButton("应用到当前影片")
+        self.apply_creation_time_button = QPushButton(self.t(
+            "应用到当前影片", "Apply to Current Video"
+        ))
         self.creation_time_edit.dateTimeChanged.connect(self._creation_time_changed)
-        creation_row.addWidget(QLabel("拍摄时间（creation_time）"))
+        creation_row.addWidget(QLabel(self.t(
+            "拍摄时间（creation_time）", "Recording time (creation_time)"
+        )))
         creation_row.addWidget(self.creation_time_edit, 1)
         creation_row.addWidget(self.apply_creation_time_button)
         right_layout.addLayout(creation_row)
@@ -372,12 +450,15 @@ class ClipEditorDialog(QDialog):
         right_layout.addWidget(self.creation_time_status)
 
         controls = QHBoxLayout()
-        self.play_button = QPushButton("播放")
+        self.play_button = QPushButton(self.t("播放", "Play"))
         self.position_label = QLabel("00:00:00.000 / 00:00:00.000")
         self.seek = SegmentTimelineSlider(Qt.Horizontal)
         self.seek.setMinimumHeight(32)
         self.seek.setRange(0, 0)
-        self.seek.setToolTip("红色区域表示正在标记或已添加的片段")
+        self.seek.setToolTip(self.t(
+            "红色区域表示正在标记或已添加的片段",
+            "Red areas show the clip being marked or clips already added",
+        ))
         controls.addWidget(self.play_button)
         controls.addWidget(self.seek, 1)
         controls.addWidget(self.position_label)
@@ -386,14 +467,14 @@ class ClipEditorDialog(QDialog):
         mark_row = QHBoxLayout()
         self.start_edit = QLineEdit("00:00:00.000")
         self.end_edit = QLineEdit("00:00:00.000")
-        self.mark_start = QPushButton("当前位置设为起点")
-        self.mark_end = QPushButton("当前位置设为终点")
-        self.add_segment = QPushButton("添加片段")
-        mark_row.addWidget(QLabel("起点"))
+        self.mark_start = QPushButton(self.t("当前位置设为起点", "Set Current Position as Start"))
+        self.mark_end = QPushButton(self.t("当前位置设为终点", "Set Current Position as End"))
+        self.add_segment = QPushButton(self.t("添加片段", "Add Clip"))
+        mark_row.addWidget(QLabel(self.t("起点", "Start")))
         mark_row.addWidget(self.start_edit)
         mark_row.addWidget(self.mark_start)
         mark_row.addSpacing(8)
-        mark_row.addWidget(QLabel("终点"))
+        mark_row.addWidget(QLabel(self.t("终点", "End")))
         mark_row.addWidget(self.end_edit)
         mark_row.addWidget(self.mark_end)
         mark_row.addWidget(self.add_segment)
@@ -401,7 +482,13 @@ class ClipEditorDialog(QDialog):
 
         self.segment_table = QTableWidget(0, 5)
         self.segment_table.setHorizontalHeaderLabels(
-            ["影片拍摄时间", "起点", "终点", "时长", "操作"]
+            [
+                self.t("影片拍摄时间", "Recording Time"),
+                self.t("起点", "Start"),
+                self.t("终点", "End"),
+                self.t("时长", "Duration"),
+                self.t("操作", "Action"),
+            ]
         )
         self.segment_table.setAlternatingRowColors(True)
         self.segment_table.setSelectionBehavior(QTableWidget.SelectRows)
@@ -412,14 +499,14 @@ class ClipEditorDialog(QDialog):
         header.setSectionResizeMode(2, QHeaderView.Stretch)
         header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(4, QHeaderView.ResizeToContents)
-        right_layout.addWidget(QLabel("当前影片的剪辑片段"))
+        right_layout.addWidget(QLabel(self.t("当前影片的剪辑片段", "Clips from Current Video")))
         right_layout.addWidget(self.segment_table, 2)
         splitter.addWidget(right)
         splitter.setSizes([270, 760])
 
         buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
-        buttons.button(QDialogButtonBox.Save).setText("保存片段")
-        buttons.button(QDialogButtonBox.Cancel).setText("取消")
+        buttons.button(QDialogButtonBox.Save).setText(self.t("保存片段", "Save Clips"))
+        buttons.button(QDialogButtonBox.Cancel).setText(self.t("取消", "Cancel"))
         root.addWidget(buttons)
 
         self._populate_files()
@@ -441,10 +528,22 @@ class ClipEditorDialog(QDialog):
         if self.video_files:
             self.file_list.setCurrentRow(0)
 
+    def t(self, chinese: str, english: str) -> str:
+        return ui_text(self.language, chinese, english)
+
+    def error_text(self, error: Exception | str) -> str:
+        return localized_error(self.language, error)
+
     def _populate_files(self) -> None:
         counts = Counter(segment.file for segment in self.segments)
         for row, path in enumerate(self.video_files):
-            suffix = f"  ·  {counts[path.name]} 个片段" if counts[path.name] else ""
+            suffix = (
+                self.t(
+                    f"  ·  {counts[path.name]} 个片段",
+                    f"  ·  {counts[path.name]} clips",
+                )
+                if counts[path.name] else ""
+            )
             item = self.file_list.item(row)
             if item is None:
                 item = QListWidgetItem()
@@ -471,7 +570,10 @@ class ClipEditorDialog(QDialog):
         if overrides:
             value = sorted(overrides)[0]
             self._set_creation_time(value)
-            self.creation_time_status.setText("使用已保存的拍摄时间覆盖值。")
+            self.creation_time_status.setText(self.t(
+                "使用已保存的拍摄时间覆盖值。",
+                "Using the saved recording-time override.",
+            ))
         else:
             filename = self.current_file.name
             if filename not in self.metadata_creation_times:
@@ -483,16 +585,22 @@ class ClipEditorDialog(QDialog):
                 self.creation_time_edit.clear_value()
                 self.creation_time_available = False
             self.creation_time_status.setText(
-                "已从影片元数据读取，可以在这里修正。"
+                self.t(
+                "已从影片元数据读取，可以在这里修正。",
+                "Read from the video metadata; you can correct it here.",
+                )
                 if value else
-                "该影片没有 creation_time，请选择实际开始拍摄时间。"
+                self.t(
+                "该影片没有 creation_time，请选择实际开始拍摄时间。",
+                "This video has no creation_time. Select its actual recording start time.",
+                )
             )
         self._refresh_segments()
 
     def _set_creation_time(self, value: str) -> None:
         date_time = QDateTime.fromString(display_creation_time(value), "yyyy-MM-dd HH:mm:ss")
         if not date_time.isValid():
-            raise ValueError("无法识别拍摄时间")
+            raise ValueError(self.t("无法识别拍摄时间", "The recording time could not be parsed."))
         blocker = QSignalBlocker(self.creation_time_edit)
         self.creation_time_edit.setDateTime(date_time)
         del blocker
@@ -503,9 +611,12 @@ class ClipEditorDialog(QDialog):
 
     def _validated_creation_time(self) -> str:
         if not self.current_file:
-            raise ValueError("请先选择影片")
+            raise ValueError(self.t("请先选择影片", "Select a video first."))
         if not self.creation_time_available:
-            raise ValueError("该影片没有可用的 creation_time，请选择拍摄时间")
+            raise ValueError(self.t(
+                "该影片没有可用的 creation_time，请选择拍摄时间",
+                "This video has no usable creation_time. Select its recording time.",
+            ))
         return normalize_creation_time(
             self.creation_time_edit.dateTime().toString("yyyy-MM-dd HH:mm:ss")
         )
@@ -516,7 +627,11 @@ class ClipEditorDialog(QDialog):
         try:
             value = self._validated_creation_time()
         except ValueError as error:
-            QMessageBox.warning(self, "无法保存拍摄时间", str(error))
+            QMessageBox.warning(
+                self,
+                self.t("无法保存拍摄时间", "Could Not Save Recording Time"),
+                self.error_text(error),
+            )
             return False
         filename = self.current_file.name
         self.segments = [
@@ -524,7 +639,10 @@ class ClipEditorDialog(QDialog):
             for segment in self.segments
         ]
         self._set_creation_time(value)
-        self.creation_time_status.setText("已将修正后的拍摄时间应用到当前影片的所有片段。")
+        self.creation_time_status.setText(self.t(
+            "已将修正后的拍摄时间应用到当前影片的所有片段。",
+            "The corrected recording time was applied to all clips from this video.",
+        ))
         self._refresh_segments()
         return True
 
@@ -555,7 +673,10 @@ class ClipEditorDialog(QDialog):
             self.end_edit.setText(format_timecode(duration / 1000))
 
     def _playback_state_changed(self, state) -> None:
-        self.play_button.setText("暂停" if state == QMediaPlayer.PlayingState else "播放")
+        self.play_button.setText(
+            self.t("暂停", "Pause")
+            if state == QMediaPlayer.PlayingState else self.t("播放", "Play")
+        )
 
     def _mark_segment_start(self) -> None:
         if self.seek.maximum() <= 0:
@@ -570,9 +691,13 @@ class ClipEditorDialog(QDialog):
         position = self.seek.sliderPosition() / 1000
         try:
             if position <= parse_timecode(self.start_edit.text()):
-                raise ValueError("终点必须晚于起点")
+                raise ValueError(self.t("终点必须晚于起点", "The end time must be later than the start time."))
         except ValueError as error:
-            QMessageBox.warning(self, "无法设置终点", str(error))
+            QMessageBox.warning(
+                self,
+                self.t("无法设置终点", "Could Not Set End Time"),
+                self.error_text(error),
+            )
             return
         self.end_edit.setText(format_timecode(position))
         self._update_draft_range()
@@ -599,7 +724,7 @@ class ClipEditorDialog(QDialog):
         try:
             creation_time = self._validated_creation_time()
             if not self.end_edit.text().strip():
-                raise ValueError("请先设置片段终点")
+                raise ValueError(self.t("请先设置片段终点", "Set the clip end time first."))
             segment = Segment(
                 self.current_file.name,
                 parse_timecode(self.start_edit.text()),
@@ -609,9 +734,15 @@ class ClipEditorDialog(QDialog):
             segment.validate()
             duration = self.player.duration() / 1000
             if duration > 0 and segment.end > duration + 0.05:
-                raise ValueError("终点超过了影片总时长")
+                raise ValueError(self.t(
+                    "终点超过了影片总时长", "The end time is beyond the video duration."
+                ))
         except ValueError as error:
-            QMessageBox.warning(self, "无法添加片段", str(error))
+            QMessageBox.warning(
+                self,
+                self.t("无法添加片段", "Could Not Add Clip"),
+                self.error_text(error),
+            )
             return
         self.segments = [
             replace(value, creation_time=creation_time)
@@ -636,13 +767,18 @@ class ClipEditorDialog(QDialog):
         self.segment_table.setRowCount(len(values))
         for row, segment in enumerate(values):
             creation_time = (
-                display_creation_time(segment.creation_time) if segment.creation_time else "使用影片元数据"
+                display_creation_time(segment.creation_time)
+                if segment.creation_time else self.t("使用影片元数据", "Use video metadata")
             )
             self.segment_table.setItem(row, 0, QTableWidgetItem(creation_time))
             self.segment_table.setItem(row, 1, QTableWidgetItem(format_timecode(segment.start)))
             self.segment_table.setItem(row, 2, QTableWidgetItem(format_timecode(segment.end)))
-            self.segment_table.setItem(row, 3, QTableWidgetItem(f"{segment.duration:.1f} 秒"))
-            button = QPushButton("删除")
+            self.segment_table.setItem(
+                row, 3, QTableWidgetItem(self.t(
+                    f"{segment.duration:.1f} 秒", f"{segment.duration:.1f} sec"
+                ))
+            )
+            button = QPushButton(self.t("删除", "Delete"))
             button.clicked.connect(lambda _checked=False, value=segment: self._delete_segment(value))
             self.segment_table.setCellWidget(row, 4, button)
 
@@ -676,8 +812,11 @@ class ClipEditorDialog(QDialog):
             if len(overrides) > 1:
                 QMessageBox.warning(
                     self,
-                    "拍摄时间不一致",
-                    f"{filename} 的多个片段使用了不同的拍摄时间，请重新应用一个时间。",
+                    self.t("拍摄时间不一致", "Recording Times Do Not Match"),
+                    self.t(
+                        f"{filename} 的多个片段使用了不同的拍摄时间，请重新应用一个时间。",
+                        f"Clips from {filename} use different recording times. Apply one time again.",
+                    ),
                 )
                 return
             if overrides:
@@ -696,15 +835,23 @@ class ClipEditorDialog(QDialog):
         if missing_times:
             QMessageBox.warning(
                 self,
-                "还有影片缺少拍摄时间",
-                "请依次选择以下影片，填写拍摄时间并点击“应用到当前影片”：\n\n"
+                self.t("还有影片缺少拍摄时间", "Videos Are Missing Recording Times"),
+                self.t(
+                "请依次选择以下影片，填写拍摄时间并点击“应用到当前影片”：\n\n",
+                "Select each video below, enter its recording time, and click "
+                '"Apply to Current Video":\n\n',
+                )
                 + "\n".join(missing_times),
             )
             return
         try:
             write_segment_list(self.media_directory / "video_segments.txt", self.segments)
         except (OSError, ValueError) as error:
-            QMessageBox.critical(self, "无法保存片段", str(error))
+            QMessageBox.critical(
+                self,
+                self.t("无法保存片段", "Could Not Save Clips"),
+                self.error_text(error),
+            )
             return
         super().accept()
 
@@ -714,12 +861,13 @@ class ClipEditorDialog(QDialog):
 
 
 class RenderDialog(QDialog):
-    def __init__(self, title: str, parent=None):
+    def __init__(self, title: str, parent=None, *, language: str = "zh"):
         super().__init__(parent)
+        self.language = language
         self.setWindowTitle(title)
         self.resize(700, 430)
         layout = QVBoxLayout(self)
-        self.status = QLabel("正在准备……")
+        self.status = QLabel(ui_text(language, "正在准备……", "Preparing…"))
         self.status.setFont(QFont(self.font().family(), 15, QFont.DemiBold))
         layout.addWidget(self.status)
         self.progress = QProgressBar()
@@ -728,7 +876,7 @@ class RenderDialog(QDialog):
         self.log = QPlainTextEdit()
         self.log.setReadOnly(True)
         layout.addWidget(self.log, 1)
-        self.cancel_button = QPushButton("取消")
+        self.cancel_button = QPushButton(ui_text(language, "取消", "Cancel"))
         row = QHBoxLayout()
         row.addStretch()
         row.addWidget(self.cancel_button)
@@ -738,7 +886,8 @@ class RenderDialog(QDialog):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle(APP_NAME)
+        self.language = system_language()
+        self.setWindowTitle(APP_NAMES[self.language])
         self.resize(1080, 760)
         self.setMinimumSize(900, 680)
         self.settings = QSettings("OpenAI-Codex", "3DTrackMovieGenerator")
@@ -753,22 +902,71 @@ class MainWindow(QMainWindow):
         self._restore_settings()
         self._update_summary()
 
+    def t(self, chinese: str, english: str) -> str:
+        return ui_text(self.language, chinese, english)
+
+    def error_text(self, error: Exception | str) -> str:
+        return localized_error(self.language, error)
+
+    def _capture_form(self) -> dict[str, str]:
+        return {
+            "track": self.track_edit.text(),
+            "name": self.name_edit.text(),
+            "orientation": self.orientation.value(),
+            "duration": self.duration_combo.currentText(),
+            "quality": self.quality.value(),
+            "media": self.media_edit.text(),
+            "music": self.music_edit.text(),
+            "output": self.output_edit.text(),
+        }
+
+    def _toggle_language(self) -> None:
+        state = self._capture_form()
+        self.language = "en" if self.language == "zh" else "zh"
+        app_name = APP_NAMES[self.language]
+        self.setWindowTitle(app_name)
+        QApplication.instance().setApplicationName(app_name)
+        old_central = self.takeCentralWidget()
+        if old_central:
+            old_central.deleteLater()
+        self.menuBar().clear()
+        self._build_ui()
+        self._build_menu()
+        self.track_edit.setText(state["track"])
+        self.name_edit.setText(state["name"])
+        self.orientation.set_value(state["orientation"])
+        duration_match = re.search(r"\d+(?:\.\d+)?", state["duration"])
+        if duration_match:
+            seconds = duration_match.group()
+            self.duration_combo.setCurrentText(self.t(f"{seconds}秒", f"{seconds} sec"))
+        self.quality.set_value(state["quality"])
+        self.media_edit.setText(state["media"])
+        self.music_edit.setText(state["music"])
+        self.output_edit.setText(state["output"])
+        self._update_summary()
+
     def _build_menu(self) -> None:
-        file_menu = self.menuBar().addMenu("文件")
-        clear_action = QAction("新建", self)
+        file_menu = self.menuBar().addMenu(self.t("文件", "File"))
+        clear_action = QAction(self.t("新建", "New"), self)
         clear_action.triggered.connect(self._clear_form)
         file_menu.addAction(clear_action)
         file_menu.addSeparator()
-        exit_action = QAction("退出", self)
+        exit_action = QAction(self.t("退出", "Exit"), self)
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
-        help_menu = self.menuBar().addMenu("帮助")
-        about_action = QAction("关于", self)
+        help_menu = self.menuBar().addMenu(self.t("帮助", "Help"))
+        about_action = QAction(self.t("关于", "About"), self)
         about_action.triggered.connect(
             lambda: QMessageBox.about(
                 self,
-                f"关于 {APP_NAME}",
-                "导入 FIT/KML 轨迹、实拍片段和背景音乐，生成 3D 轨迹影片。",
+                self.t(
+                    f"关于 {APP_NAMES['zh']}",
+                    f"About {APP_NAMES['en']}",
+                ),
+                self.t(
+                    "导入 FIT/KML 轨迹、实拍片段和背景音乐，生成 3D 轨迹影片。",
+                    "Import a FIT/KML track, video clips, and background music to create a 3D track movie.",
+                ),
             )
         )
         help_menu.addAction(about_action)
@@ -784,94 +982,109 @@ class MainWindow(QMainWindow):
         icon = QLabel("⌁")
         icon.setStyleSheet("color:#eeaa1f; font-size:42px; font-weight:900;")
         titles = QVBoxLayout()
-        title = QLabel(APP_NAME)
+        title = QLabel(APP_NAMES[self.language])
         title.setObjectName("title")
-        subtitle = QLabel("导入素材，轻松生成你的3D轨迹影片")
+        subtitle = QLabel(self.t(
+            "导入素材，轻松生成你的3D轨迹影片",
+            "Import your media and easily create a 3D track movie",
+        ))
         subtitle.setObjectName("subtitle")
         titles.addWidget(title)
         titles.addWidget(subtitle)
         header.addWidget(icon)
         header.addLayout(titles)
         header.addStretch()
+        language_button = QPushButton(self.t("English", "中文"))
+        language_button.setToolTip(self.t(
+            "切换到英文", "Switch to Chinese"
+        ))
+        language_button.clicked.connect(self._toggle_language)
+        header.addWidget(language_button)
         root.addLayout(header)
 
-        activity_box = QGroupBox("活动信息")
+        activity_box = QGroupBox(self.t("活动信息", "Activity"))
         activity = QGridLayout(activity_box)
         activity.setColumnStretch(1, 1)
         self.track_edit = QLineEdit()
-        track_button = QPushButton("选择文件")
+        track_button = QPushButton(self.t("选择文件", "Choose File"))
         track_button.clicked.connect(self._choose_track)
         self.name_edit = QLineEdit()
-        activity.addWidget(QLabel("轨迹文件"), 0, 0)
+        activity.addWidget(QLabel(self.t("轨迹文件", "Track File")), 0, 0)
         activity.addWidget(self.track_edit, 0, 1)
         activity.addWidget(track_button, 0, 2)
-        activity.addWidget(QLabel("活动名称"), 1, 0)
+        activity.addWidget(QLabel(self.t("活动名称", "Activity Name")), 1, 0)
         activity.addWidget(self.name_edit, 1, 1, 1, 2)
         root.addWidget(activity_box)
 
-        settings_box = QGroupBox("影片设置")
+        settings_box = QGroupBox(self.t("影片设置", "Movie Settings"))
         settings = QGridLayout(settings_box)
         settings.setColumnStretch(3, 1)
-        self.orientation = ChoiceButtons([("▭  横屏", "landscape"), ("▯  竖屏", "portrait")], "landscape")
+        self.orientation = ChoiceButtons(
+            [
+                (self.t("▭  横屏", "▭  Landscape"), "landscape"),
+                (self.t("▯  竖屏", "▯  Portrait"), "portrait"),
+            ],
+            "landscape",
+        )
         self.duration_combo = QComboBox()
         self.duration_combo.setEditable(True)
-        self.duration_combo.addItems(["15秒", "30秒", "45秒", "60秒", "90秒"])
-        self.duration_combo.setCurrentText("30秒")
+        self.duration_combo.addItems([
+            self.t(f"{seconds}秒", f"{seconds} sec")
+            for seconds in (15, 30, 45, 60, 90)
+        ])
+        self.duration_combo.setCurrentText(self.t("30秒", "30 sec"))
         self.quality = ChoiceButtons([("720P", "720p"), ("1080P", "1080p")], "1080p")
-        settings.addWidget(QLabel("画面方向"), 0, 0)
+        settings.addWidget(QLabel(self.t("画面方向", "Orientation")), 0, 0)
         settings.addWidget(self.orientation, 0, 1)
-        settings.addWidget(QLabel("影片时长"), 0, 2)
+        settings.addWidget(QLabel(self.t("影片时长", "Duration")), 0, 2)
         settings.addWidget(self.duration_combo, 0, 3)
-        settings.addWidget(QLabel("输出画质"), 0, 4)
+        settings.addWidget(QLabel(self.t("输出画质", "Output Quality")), 0, 4)
         settings.addWidget(self.quality, 0, 5)
         root.addWidget(settings_box)
 
-        media_box = QGroupBox("素材")
+        media_box = QGroupBox(self.t("素材", "Media"))
         media = QGridLayout(media_box)
         media.setColumnStretch(1, 1)
         self.media_edit = QLineEdit()
-        media_button = QPushButton("选择文件夹")
+        media_button = QPushButton(self.t("选择文件夹", "Choose Folder"))
         media_button.clicked.connect(self._choose_media_directory)
         self.summary_label = QLabel()
         self.summary_label.setObjectName("summary")
-        self.edit_segments_button = QPushButton("编辑影片片段")
+        self.edit_segments_button = QPushButton(self.t("编辑影片片段", "Edit Video Clips"))
         self.edit_segments_button.clicked.connect(self._edit_segments)
         self.music_edit = QLineEdit()
-        music_button = QPushButton("选择音乐")
+        music_button = QPushButton(self.t("选择音乐", "Choose Music"))
         music_button.clicked.connect(self._choose_music)
-        media.addWidget(QLabel("影片文件夹"), 0, 0)
+        media.addWidget(QLabel(self.t("影片文件夹", "Video Folder")), 0, 0)
         media.addWidget(self.media_edit, 0, 1)
         media.addWidget(media_button, 0, 2)
         media.addWidget(self.summary_label, 1, 1)
         media.addWidget(self.edit_segments_button, 1, 2)
-        media.addWidget(QLabel("背景音乐"), 2, 0)
+        media.addWidget(QLabel(self.t("背景音乐", "Background Music")), 2, 0)
         media.addWidget(self.music_edit, 2, 1)
         media.addWidget(music_button, 2, 2)
         root.addWidget(media_box)
 
-        output_box = QGroupBox("输出")
+        output_box = QGroupBox(self.t("输出", "Output"))
         output = QGridLayout(output_box)
         output.setColumnStretch(1, 1)
         self.output_edit = QLineEdit()
-        output_button = QPushButton("选择位置")
+        output_button = QPushButton(self.t("选择位置", "Choose Location"))
         output_button.clicked.connect(self._choose_output_directory)
-        output.addWidget(QLabel("保存到"), 0, 0)
+        output.addWidget(QLabel(self.t("保存到", "Save To")), 0, 0)
         output.addWidget(self.output_edit, 0, 1)
         output.addWidget(output_button, 0, 2)
         root.addWidget(output_box)
         root.addStretch()
 
         footer = QHBoxLayout()
-        self.status_label = QLabel("●  请选择轨迹文件")
+        self.status_label = QLabel(self.t("●  请选择轨迹文件", "●  Select a track file"))
         self.status_label.setObjectName("success")
-        preview_button = QPushButton("▷  快速预览")
-        preview_button.clicked.connect(lambda: self._start_render(preview=True))
-        generate_button = QPushButton("生成影片")
+        generate_button = QPushButton(self.t("生成影片", "Generate Movie"))
         generate_button.setObjectName("primaryButton")
         generate_button.clicked.connect(lambda: self._start_render(preview=False))
         footer.addWidget(self.status_label)
         footer.addStretch()
-        footer.addWidget(preview_button)
         footer.addWidget(generate_button)
         root.addLayout(footer)
 
@@ -880,7 +1093,10 @@ class MainWindow(QMainWindow):
 
     def _choose_track(self) -> None:
         filename, _ = QFileDialog.getOpenFileName(
-            self, "选择轨迹文件", self._last_directory("trackDirectory"), "轨迹文件 (*.fit *.FIT *.kml *.KML)"
+            self,
+            self.t("选择轨迹文件", "Choose Track File"),
+            self._last_directory("trackDirectory"),
+            self.t("轨迹文件 (*.fit *.FIT *.kml *.KML)", "Track files (*.fit *.FIT *.kml *.KML)"),
         )
         if not filename:
             return
@@ -893,7 +1109,9 @@ class MainWindow(QMainWindow):
 
     def _choose_media_directory(self) -> None:
         directory = QFileDialog.getExistingDirectory(
-            self, "选择影片文件夹", self._last_directory("mediaDirectory")
+            self,
+            self.t("选择影片文件夹", "Choose Video Folder"),
+            self._last_directory("mediaDirectory"),
         )
         if not directory:
             return
@@ -905,15 +1123,22 @@ class MainWindow(QMainWindow):
             self.segments = read_segment_list(segment_file)
         except ValueError as error:
             self.segments = []
-            QMessageBox.warning(self, "片段配置无法读取", str(error))
+            QMessageBox.warning(
+                self,
+                self.t("片段配置无法读取", "Could Not Read Clip Configuration"),
+                self.error_text(error),
+            )
         self._update_summary()
 
     def _choose_music(self) -> None:
         filename, _ = QFileDialog.getOpenFileName(
             self,
-            "选择背景音乐",
+            self.t("选择背景音乐", "Choose Background Music"),
             self._last_directory("musicDirectory"),
-            "音频文件 (*.mp3 *.wav *.m4a *.aac *.flac)",
+            self.t(
+                "音频文件 (*.mp3 *.wav *.m4a *.aac *.flac)",
+                "Audio files (*.mp3 *.wav *.m4a *.aac *.flac)",
+            ),
         )
         if filename:
             path = Path(filename)
@@ -922,7 +1147,9 @@ class MainWindow(QMainWindow):
 
     def _choose_output_directory(self) -> None:
         directory = QFileDialog.getExistingDirectory(
-            self, "选择输出位置", self._last_directory("outputDirectory", str(ROOT / "output"))
+            self,
+            self.t("选择输出位置", "Choose Output Location"),
+            self._last_directory("outputDirectory", str(ROOT / "output")),
         )
         if directory:
             self.output_edit.setText(directory)
@@ -932,12 +1159,26 @@ class MainWindow(QMainWindow):
     def _edit_segments(self) -> None:
         directory = Path(self.media_edit.text().strip())
         if not directory.is_dir():
-            QMessageBox.information(self, "请先选择影片文件夹", "请选择包含实拍影片的文件夹。")
+            QMessageBox.information(
+                self,
+                self.t("请先选择影片文件夹", "Choose a Video Folder First"),
+                self.t(
+                    "请选择包含实拍影片的文件夹。",
+                    "Choose a folder containing your source videos.",
+                ),
+            )
             return
         if not list_video_files(directory):
-            QMessageBox.information(self, "没有找到影片", "这个文件夹中没有找到 MP4、MOV 或 M4V 影片。")
+            QMessageBox.information(
+                self,
+                self.t("没有找到影片", "No Videos Found"),
+                self.t(
+                    "这个文件夹中没有找到 MP4、MOV 或 M4V 影片。",
+                    "No MP4, MOV, or M4V videos were found in this folder.",
+                ),
+            )
             return
-        dialog = ClipEditorDialog(directory, self.segments, self)
+        dialog = ClipEditorDialog(directory, self.segments, self, language=self.language)
         if dialog.exec() == QDialog.Accepted:
             self.segments = dialog.segments
             self._update_summary()
@@ -946,10 +1187,15 @@ class MainWindow(QMainWindow):
         directory = Path(self.media_edit.text().strip()) if self.media_edit.text().strip() else None
         count = len(list_video_files(directory)) if directory else 0
         if count:
-            self.summary_label.setText(f"已找到 {count} 部影片，已选择 {len(self.segments)} 个片段")
+            self.summary_label.setText(self.t(
+                f"已找到 {count} 部影片，已选择 {len(self.segments)} 个片段",
+                f"Found {count} videos; {len(self.segments)} clips selected",
+            ))
             self.edit_segments_button.setEnabled(True)
         else:
-            self.summary_label.setText("尚未选择影片文件夹（可选）")
+            self.summary_label.setText(self.t(
+                "尚未选择影片文件夹（可选）", "No video folder selected (optional)"
+            ))
             self.edit_segments_button.setEnabled(False)
         self._update_status()
 
@@ -957,18 +1203,21 @@ class MainWindow(QMainWindow):
         track = Path(self.track_edit.text().strip())
         output = Path(self.output_edit.text().strip()) if self.output_edit.text().strip() else None
         if not track.is_file():
-            self.status_label.setText("●  请选择轨迹文件")
+            self.status_label.setText(self.t("●  请选择轨迹文件", "●  Select a track file"))
         elif not self.name_edit.text().strip():
-            self.status_label.setText("●  请填写活动名称")
+            self.status_label.setText(self.t("●  请填写活动名称", "●  Enter an activity name"))
         elif not output:
-            self.status_label.setText("●  请选择输出位置")
+            self.status_label.setText(self.t("●  请选择输出位置", "●  Choose an output location"))
         else:
-            self.status_label.setText("●  素材准备完成，可以开始生成")
+            self.status_label.setText(self.t(
+                "●  素材准备完成，可以开始生成",
+                "●  Media is ready; you can generate the movie",
+            ))
 
     def _duration(self) -> float:
         match = re.search(r"\d+(?:\.\d+)?", self.duration_combo.currentText())
         if not match:
-            raise ValueError("请输入有效的影片时长")
+            raise ValueError(self.t("请输入有效的影片时长", "Enter a valid movie duration."))
         return float(match.group())
 
     def _build_config(self, preview: bool) -> tuple[dict, Path, Path]:
@@ -977,7 +1226,7 @@ class MainWindow(QMainWindow):
         music_file = Path(self.music_edit.text().strip()) if self.music_edit.text().strip() else None
         output_directory = Path(self.output_edit.text().strip())
         if not output_directory:
-            raise ValueError("请选择输出位置")
+            raise ValueError(self.t("请选择输出位置", "Choose an output location."))
         output_directory.mkdir(parents=True, exist_ok=True)
         segment_list = media_directory / "video_segments.txt" if media_directory else None
         if self.segments and segment_list:
@@ -1003,25 +1252,45 @@ class MainWindow(QMainWindow):
     def _preflight(self) -> None:
         missing = [name for name in ("ffmpeg", "ffprobe") if not shutil.which(name)]
         if missing:
-            raise ValueError("缺少必要程序：" + "、".join(missing))
+            raise ValueError(self.t(
+                "缺少必要程序：" + "、".join(missing),
+                "Required programs are missing: " + ", ".join(missing),
+            ))
         if not (ROOT / "node_modules" / "cesium" / "Build" / "Cesium" / "Cesium.js").is_file():
-            raise ValueError("缺少 CesiumJS，请先在项目目录运行 npm install")
+            raise ValueError(self.t(
+                "缺少 CesiumJS，请先在项目目录运行 npm install",
+                "CesiumJS is missing. Run npm install in the project directory first.",
+            ))
 
     def _start_render(self, preview: bool) -> None:
         if self.process and self.process.state() != QProcess.NotRunning:
-            QMessageBox.information(self, "正在生成", "请等待当前任务完成，或先取消当前任务。")
+            QMessageBox.information(
+                self,
+                self.t("正在生成", "Generation in Progress"),
+                self.t(
+                    "请等待当前任务完成，或先取消当前任务。",
+                    "Wait for the current task to finish, or cancel it first.",
+                ),
+            )
             return
         try:
             self._preflight()
             _config, config_path, final_output = self._build_config(preview)
         except (OSError, ValueError) as error:
-            QMessageBox.warning(self, "无法开始生成", str(error))
+            QMessageBox.warning(
+                self,
+                self.t("无法开始生成", "Could Not Start Generation"),
+                self.error_text(error),
+            )
             return
         if not preview and final_output.exists():
             answer = QMessageBox.question(
                 self,
-                "影片已经存在",
-                f"输出位置已经有同名影片：\n{final_output.name}\n\n是否覆盖？",
+                self.t("影片已经存在", "Movie Already Exists"),
+                self.t(
+                    f"输出位置已经有同名影片：\n{final_output.name}\n\n是否覆盖？",
+                    f"A movie with the same name already exists:\n{final_output.name}\n\nOverwrite it?",
+                ),
                 QMessageBox.Yes | QMessageBox.No,
                 QMessageBox.No,
             )
@@ -1030,7 +1299,12 @@ class MainWindow(QMainWindow):
 
         self.is_preview = preview
         self.expected_output = final_output
-        self.progress_dialog = RenderDialog("快速预览" if preview else "生成影片", self)
+        self.progress_dialog = RenderDialog(
+            self.t("快速预览", "Quick Preview")
+            if preview else self.t("生成影片", "Generate Movie"),
+            self,
+            language=self.language,
+        )
         self.progress_dialog.cancel_button.clicked.connect(self._cancel_render)
         self.progress_dialog.show()
 
@@ -1070,35 +1344,52 @@ class MainWindow(QMainWindow):
         dialog = self.progress_dialog
         output = self.expected_output
         if dialog:
-            dialog.cancel_button.setText("关闭")
+            dialog.cancel_button.setText(self.t("关闭", "Close"))
             try:
                 dialog.cancel_button.clicked.disconnect()
             except RuntimeError:
                 pass
             dialog.cancel_button.clicked.connect(dialog.accept)
             if exit_code == 0 and output and output.is_file():
-                dialog.status.setText("预览生成完成" if self.is_preview else "影片生成完成")
+                dialog.status.setText(
+                    self.t("预览生成完成", "Preview Complete")
+                    if self.is_preview else self.t("影片生成完成", "Movie Complete")
+                )
                 dialog.progress.setRange(0, 1)
                 dialog.progress.setValue(1)
-                open_button = QPushButton("打开影片")
+                open_button = QPushButton(self.t("打开影片", "Open Movie"))
                 open_button.clicked.connect(lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(output))))
                 dialog.layout().itemAt(dialog.layout().count() - 1).layout().insertWidget(1, open_button)
             else:
-                dialog.status.setText(f"生成失败（退出代码 {exit_code}）")
-                QMessageBox.critical(self, "生成失败", "请查看生成窗口中的详细信息。")
+                dialog.status.setText(self.t(
+                    f"生成失败（退出代码 {exit_code}）",
+                    f"Generation failed (exit code {exit_code})",
+                ))
+                QMessageBox.critical(
+                    self,
+                    self.t("生成失败", "Generation Failed"),
+                    self.t(
+                        "请查看生成窗口中的详细信息。",
+                        "See the generation window for details.",
+                    ),
+                )
         self.process = None
         self._update_status()
 
     def _clear_form(self) -> None:
         if self.process and self.process.state() != QProcess.NotRunning:
-            QMessageBox.information(self, "正在生成", "请先等待当前任务结束。")
+            QMessageBox.information(
+                self,
+                self.t("正在生成", "Generation in Progress"),
+                self.t("请先等待当前任务结束。", "Wait for the current task to finish."),
+            )
             return
         self.track_edit.clear()
         self.name_edit.clear()
         self.media_edit.clear()
         self.music_edit.clear()
         self.segments = []
-        self.duration_combo.setCurrentText("30秒")
+        self.duration_combo.setCurrentText(self.t("30秒", "30 sec"))
         self._update_summary()
 
     def _restore_settings(self) -> None:
@@ -1107,7 +1398,14 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:
         if self.process and self.process.state() != QProcess.NotRunning:
-            answer = QMessageBox.question(self, "任务仍在运行", "要取消当前任务并退出吗？")
+            answer = QMessageBox.question(
+                self,
+                self.t("任务仍在运行", "Task Still Running"),
+                self.t(
+                    "要取消当前任务并退出吗？",
+                    "Cancel the current task and exit?",
+                ),
+            )
             if answer != QMessageBox.Yes:
                 event.ignore()
                 return
@@ -1117,7 +1415,7 @@ class MainWindow(QMainWindow):
 
 def main() -> int:
     app = QApplication(sys.argv)
-    app.setApplicationName(APP_NAME)
+    app.setApplicationName(APP_NAMES[system_language()])
     app.setOrganizationName("3DTrackMovie")
     app.setStyle("Fusion")
     app.setStyleSheet(STYLE)

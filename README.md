@@ -1,6 +1,6 @@
 # 3D Tracker · 3D 轨迹影片生成器
 
-这是一个带中文桌面界面的轨迹视频工具。导入 FIT 或 Garmin 风格的 KML，在窗口里选择横屏或竖屏、时长和画质，就能把运动路线做成带 3D 地形的 MP4。还可以加入沿途实拍片段和背景音乐。
+这是一个支持中英文桌面界面的轨迹视频工具。导入 FIT 或 Garmin 风格的 KML，在窗口里选择横屏或竖屏、时长和画质，就能把运动路线做成带 3D 地形的 MP4。还可以加入沿途实拍片段和背景音乐。
 
 3D Tracker is an open-source desktop app for turning FIT and Garmin-style KML activity tracks into 3D route videos. Animate your route over terrain and satellite imagery, sync real footage by recording time, add music, and export a 720p or 1080p MP4 in landscape or portrait format.
 
@@ -14,10 +14,12 @@
 
 ## 界面怎么用
 
+启动时会根据系统语言选择中文或英文。点击窗口右上角的「English」或「中文」即可切换。
+
 1. 在 **活动信息** 中点击「选择文件」导入轨迹。活动名称默认取自文件名，可以修改。推荐使用 FIT，文件中有记录时可显示心率、海拔和实时配速。
 2. 在 **影片设置** 中选横屏或竖屏、720P 或 1080P，再选影片时长。镜头距离会根据路线跨度、海拔和画幅自动调整。
 3. 可以在 **素材** 中选择实拍影片文件夹，再点「编辑影片片段」。在弹窗里播放影片并标记起点和终点，同一个文件可以选多段。还可以修正拍摄时间，便于与轨迹对齐。修正会保存在 `video_segments.txt` 中。背景音乐也在这一区选择。
-4. 在 **输出** 中选好保存位置，点「快速预览」检查路线和镜头，或点「生成影片」导出含所选素材的完整 MP4。生成完成后可点「打开影片」。
+4. 在 **输出** 中选好保存位置，点「生成影片」导出含所选素材的完整 MP4。生成完成后可点「打开影片」。
 
 第一次试用时，可以在「轨迹文件」中选择仓库自带的 [合成 KML 示例](examples/synthetic-track.kml)。
 
@@ -52,12 +54,14 @@ npm.cmd ci
 
 ## English quick start
 
-The app runs from source and its desktop interface is in Chinese. Install Python 3.9+ with PySide6 support, Node.js 22.17+ with npm, a WebGL 2-capable Chrome, Chromium, or Edge browser, and FFmpeg with `libx264` encoding. Make sure `ffmpeg` and `ffprobe` are on your `PATH`. Then run the [installation commands for your OS](#安装并启动-gui) from the project directory to launch `gui_app.py`.
+The app runs from source. Install Python 3.9+ with PySide6 support, Node.js 22.17+ with npm, a WebGL 2-capable Chrome, Chromium, or Edge browser, and FFmpeg with `libx264` encoding. Make sure `ffmpeg` and `ffprobe` are on your `PATH`. Then run the [installation commands for your OS](#安装并启动-gui) from the project directory to launch `gui_app.py`.
 
-1. In **活动信息** (Activity), click **选择文件** (Choose File) to import a FIT or Garmin-style KML file. You can try the bundled [synthetic KML track](examples/synthetic-track.kml). FIT recordings can also supply elevation, heart rate, and live pace data when available.
-2. In **影片设置** (Video Settings), choose landscape (**横屏**) or portrait (**竖屏**), a duration, and 720p or 1080p. The camera adjusts automatically to the route and frame.
-3. In **素材** (Media), you can choose a folder of footage and click **编辑影片片段** (Edit Clips) to mark in and out points and align clips to the route by recording time. You can also choose background music.
-4. In **输出** (Output), choose a destination and click **生成影片** (Export Video). When it finishes, click **打开影片** (Open Video) to watch the MP4.
+The desktop interface starts in Chinese or English based on your system language. Use the **English** or **中文** button in the top-right corner to switch.
+
+1. In **Activity**, click **Choose File** to import a FIT or Garmin-style KML file. You can try the bundled [synthetic KML track](examples/synthetic-track.kml). FIT recordings can also supply elevation, heart rate, and recorded pace when available.
+2. In **Movie Settings**, choose landscape or portrait, a duration, and 720p or 1080p. The camera adjusts automatically to the route and frame.
+3. In **Media**, you can choose a folder of footage and click **Edit Video Clips** to mark in and out points and align clips to the route by recording time. You can also choose background music.
+4. In **Output**, choose a destination and click **Generate Movie**. When it finishes, click **Open Movie** to watch the MP4.
 
 The app reads track files locally. The first render for an uncached area needs internet access to fetch terrain and imagery tiles for the area covered by the route.
 
