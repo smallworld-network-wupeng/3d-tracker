@@ -24,9 +24,12 @@ from urllib.parse import urlparse
 from prepare_track import prepare
 from prepare_terrain import prepare_terrain
 from prepare_imagery import prepare_imagery
+from runtime_paths import IS_BUNDLED, RESOURCE_ROOT, WORK_ROOT, bundled_chromium, configure_runtime_environment
 
 
-ROOT = Path(__file__).resolve().parent
+configure_runtime_environment()
+ROOT = RESOURCE_ROOT
+WEB_ROOT = WORK_ROOT / "web"
 
 
 class StaticHandler(http.server.SimpleHTTPRequestHandler):
@@ -34,6 +37,8 @@ class StaticHandler(http.server.SimpleHTTPRequestHandler):
         relative = urlparse(path).path.lstrip("/")
         if relative.startswith("cesium/"):
             return str(ROOT / "node_modules" / "cesium" / "Build" / "Cesium" / relative.removeprefix("cesium/"))
+        if relative in {"track.json", "render-config.json"} or relative.startswith(("terrain/", "imagery/")):
+            return str(WEB_ROOT / relative)
         return str(ROOT / "web" / (relative or "index.html"))
 
     def log_message(self, _format: str, *args) -> None:
@@ -140,6 +145,11 @@ class CDP:
 
 
 def find_chrome() -> str:
+    if IS_BUNDLED:
+        executable = bundled_chromium()
+        if executable.is_file():
+            return str(executable)
+        raise FileNotFoundError("Bundled Chromium is missing.")
     candidates = [
         "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
         "/Applications/Chromium.app/Contents/MacOS/Chromium",
@@ -205,8 +215,9 @@ def evaluate(cdp: CDP, expression: str, await_promise: bool = False):
 def render(args) -> None:
     if not (ROOT / "node_modules" / "cesium" / "Build" / "Cesium" / "Cesium.js").exists():
         raise FileNotFoundError("缺少 CesiumJS。请先运行 npm install")
+    WEB_ROOT.mkdir(parents=True, exist_ok=True)
     metadata = prepare(
-        args.track.resolve(), ROOT / "web" / "track.json", args.sample_seconds,
+        args.track.resolve(), WEB_ROOT / "track.json", args.sample_seconds,
         args.simplify_meters, args.name,
     )
     browser_config = {
@@ -241,7 +252,7 @@ def render(args) -> None:
         "portrait_profile_width": args.portrait_profile_width,
         "landscape_title_width": args.landscape_title_width,
     }
-    (ROOT / "web" / "render-config.json").write_text(
+    (WEB_ROOT / "render-config.json").write_text(
         json.dumps(browser_config, ensure_ascii=False, indent=2), encoding="utf-8"
     )
     print(
@@ -249,10 +260,10 @@ def render(args) -> None:
         f"{metadata['sampled_point_count']} 抽样点 → {metadata['point_count']} 渲染点"
     )
     if not args.no_terrain:
-        terrain = prepare_terrain(metadata["bounds"], ROOT / "web" / "terrain", args.terrain_max_level)
+        terrain = prepare_terrain(metadata["bounds"], WEB_ROOT / "terrain", args.terrain_max_level)
         print(f"SRTM 地形: {terrain['tile_count']} 瓦片，最高层级 {terrain['max_level']}")
     if not args.no_imagery:
-        imagery = prepare_imagery(metadata["bounds"], ROOT / "web" / "imagery", 8, args.imagery_max_level)
+        imagery = prepare_imagery(metadata["bounds"], WEB_ROOT / "imagery", 8, args.imagery_max_level)
         print(f"Esri 影像: {imagery['tile_count']} 瓦片，层级 8–{imagery['max_level']}")
 
     server_port = free_port()

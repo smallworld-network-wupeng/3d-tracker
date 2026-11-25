@@ -64,9 +64,17 @@ from app_config import (
     write_project_config,
     write_segment_list,
 )
+from runtime_paths import (
+    IS_BUNDLED,
+    RESOURCE_ROOT,
+    WORK_ROOT,
+    configure_runtime_environment,
+    default_output_directory,
+)
 
 
-ROOT = Path(__file__).resolve().parent
+configure_runtime_environment()
+ROOT = RESOURCE_ROOT
 APP_NAMES = {
     "zh": "3D轨迹影片生成器",
     "en": "3D Track Movie Generator",
@@ -1149,7 +1157,7 @@ class MainWindow(QMainWindow):
         directory = QFileDialog.getExistingDirectory(
             self,
             self.t("选择输出位置", "Choose Output Location"),
-            self._last_directory("outputDirectory", str(ROOT / "output")),
+            self._last_directory("outputDirectory", str(default_output_directory())),
         )
         if directory:
             self.output_edit.setText(directory)
@@ -1309,11 +1317,14 @@ class MainWindow(QMainWindow):
         self.progress_dialog.show()
 
         self.process = QProcess(self)
-        self.process.setWorkingDirectory(str(ROOT))
+        self.process.setWorkingDirectory(str(WORK_ROOT))
         self.process.setProcessChannelMode(QProcess.MergedChannels)
         self.process.readyReadStandardOutput.connect(self._read_process_output)
         self.process.finished.connect(self._render_finished)
-        self.process.start(sys.executable, [str(ROOT / "generate_from_config.py"), str(config_path)])
+        arguments = ["--generate-from-config", str(config_path)] if IS_BUNDLED else [
+            str(ROOT / "generate_from_config.py"), str(config_path)
+        ]
+        self.process.start(sys.executable, arguments)
 
     def _read_process_output(self) -> None:
         if not self.process or not self.progress_dialog:
@@ -1393,7 +1404,7 @@ class MainWindow(QMainWindow):
         self._update_summary()
 
     def _restore_settings(self) -> None:
-        output = self._last_directory("outputDirectory", str(ROOT / "output"))
+        output = self._last_directory("outputDirectory", str(default_output_directory()))
         self.output_edit.setText(output)
 
     def closeEvent(self, event) -> None:
@@ -1425,4 +1436,16 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    bundled_commands = {
+        "--generate-from-config": ("generate_from_config", "main"),
+        "--render-video": ("render_video", "main"),
+        "--compose-media-video": ("compose_media_video", "main"),
+        "--mix-music": ("mix_music", "main"),
+    }
+    command = sys.argv[1] if len(sys.argv) > 1 else None
+    if IS_BUNDLED and command in bundled_commands:
+        module_name, function_name = bundled_commands[command]
+        sys.argv = [sys.argv[0], *sys.argv[2:]]
+        module = __import__(module_name)
+        raise SystemExit(getattr(module, function_name)())
     raise SystemExit(main())

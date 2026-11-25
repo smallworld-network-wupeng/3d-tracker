@@ -9,8 +9,11 @@ import subprocess
 import sys
 from pathlib import Path
 
+from runtime_paths import IS_BUNDLED, RESOURCE_ROOT, WORK_ROOT, configure_runtime_environment
 
-ROOT = Path(__file__).resolve().parent
+
+configure_runtime_environment()
+ROOT = RESOURCE_ROOT
 
 
 def add_options(command: list[str], values: dict, mapping: dict[str, str]) -> None:
@@ -39,7 +42,12 @@ def main() -> None:
     music = config.get("music", {})
     python = config.get("python", sys.executable)
 
-    render_command = [python, str(ROOT / "render_video.py"), str(track["file"]), "-o", str(render["output"])]
+    def entrypoint(script: str, bundled_flag: str) -> list[str]:
+        if IS_BUNDLED:
+            return [sys.executable, bundled_flag]
+        return [python, str(ROOT / script)]
+
+    render_command = [*entrypoint("render_video.py", "--render-video"), str(track["file"]), "-o", str(render["output"])]
     if track.get("name"):
         render_command.extend(["--name", str(track["name"])])
     add_options(render_command, track, {
@@ -76,9 +84,9 @@ def main() -> None:
         render_command.append("--no-imagery")
 
     compose_command = [
-        python, str(ROOT / "compose_media_video.py"), "--base", str(render["output"]),
-        "--base-seconds", str(render["seconds"]), "--track-json", str(ROOT / "web" / "track.json"),
-        "--render-config", str(ROOT / "web" / "render-config.json"),
+        *entrypoint("compose_media_video.py", "--compose-media-video"), "--base", str(render["output"]),
+        "--base-seconds", str(render["seconds"]), "--track-json", str(WORK_ROOT / "web" / "track.json"),
+        "--render-config", str(WORK_ROOT / "web" / "render-config.json"),
         "--media-dir", str(media.get("directory", "")), "--segment-list", str(media.get("segment_list", "")),
         "--output", str(media.get("output", "output/final.mp4")),
         "--report", str(media.get("report", "output/media-events.json")),
@@ -94,7 +102,7 @@ def main() -> None:
 
     music_input = media.get("output") if media.get("enabled", False) else render["output"]
     music_command = [
-        python, str(ROOT / "mix_music.py"), "--video", str(music_input),
+        *entrypoint("mix_music.py", "--mix-music"), "--video", str(music_input),
         "--music", str(music.get("file", "")),
         "--output", str(music.get("output", "output/final-with-music.mp4")),
     ]
@@ -127,7 +135,7 @@ def main() -> None:
     for command in commands:
         print(display(command), flush=True)
         if not args.dry_run:
-            subprocess.run(command, cwd=ROOT, check=True)
+            subprocess.run(command, cwd=WORK_ROOT, check=True)
 
 
 if __name__ == "__main__":

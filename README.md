@@ -65,6 +65,19 @@ The desktop interface starts in Chinese or English based on your system language
 
 The app reads track files locally. The first render for an uncached area needs internet access to fetch terrain and imagery tiles for the area covered by the route.
 
+## 打包 macOS 版本
+
+Apple Silicon 预览版可从 [GitHub Releases](https://github.com/smallworld-network-wupeng/3d-tracker/releases) 下载。应用内置 Python/PySide6、CesiumJS、FFmpeg/ffprobe 和 Chromium。当前二进制使用 macOS 26 构建的 Homebrew FFmpeg，要求 macOS 26 或更新版本。
+
+本机构建需要已安装的 Homebrew FFmpeg，以及 [Ungoogled Chromium 157.0.8103.78-1.1 的 arm64 镜像](https://github.com/ungoogled-software/ungoogled-chromium-macos/releases/tag/157.0.8103.78-1.1)。挂载镜像后，将其中的 `Chromium.app` 路径传给构建脚本。第三方许可、构建配方和对应源码地址随应用附带。
+
+```bash
+.venv/bin/python -m pip install "pyinstaller>=6.10,<7"
+./scripts/build_macos_release.sh "/path/to/Chromium.app"
+```
+
+输出为 `dist/3D Tracker.app` 和 `release/github/3D-Tracker-0.1.0-macOS-arm64.zip`。预览版使用临时（ad-hoc）签名，macOS Gatekeeper 可能会拦截首次打开。
+
 <details>
 <summary>命令行与批量生成</summary>
 

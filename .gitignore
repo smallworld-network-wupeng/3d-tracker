@@ -32,3 +32,8 @@ video_segments.txt
 
 .env
 .env.*
+
+# macOS release artifacts and packaging staging
+/build/
+/dist/
+/release/
