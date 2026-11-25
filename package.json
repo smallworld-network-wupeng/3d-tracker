@@ -1,0 +1,9 @@
+{
+  "name": "cesium-track-video",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Render a timestamped KML track as a deterministic CesiumJS video",
+  "dependencies": {
+    "cesium": "^1.134.1"
+  }
+}

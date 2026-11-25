@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <name>合成演示路线</name>
+    <description>合成的坐标、海拔和时间，用于演示视频生成。</description>
+    <Placemark>
+      <TimeSpan><begin>2020-01-01T00:00:00Z</begin></TimeSpan>
+      <Point><coordinates>0.000,0.000,15</coordinates></Point>
+    </Placemark>
+    <Placemark>
+      <TimeSpan><begin>2020-01-01T00:05:00Z</begin></TimeSpan>
+      <Point><coordinates>0.006,0.002,35</coordinates></Point>
+    </Placemark>
+    <Placemark>
+      <TimeSpan><begin>2020-01-01T00:10:00Z</begin></TimeSpan>
+      <Point><coordinates>0.012,0.009,62</coordinates></Point>
+    </Placemark>
+    <Placemark>
+      <TimeSpan><begin>2020-01-01T00:15:00Z</begin></TimeSpan>
+      <Point><coordinates>0.009,0.017,48</coordinates></Point>
+    </Placemark>
+    <Placemark>
+      <TimeSpan><begin>2020-01-01T00:20:00Z</begin></TimeSpan>
+      <Point><coordinates>0.001,0.019,27</coordinates></Point>
+    </Placemark>
+  </Document>
+</kml>

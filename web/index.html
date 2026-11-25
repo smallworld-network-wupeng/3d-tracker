@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Cesium 轨迹视频</title>
+    <script>window.CESIUM_BASE_URL = "/cesium/";</script>
+    <link rel="stylesheet" href="/cesium/Widgets/widgets.css" />
+    <link rel="stylesheet" href="/styles.css" />
+    <script src="/cesium/Cesium.js"></script>
+  </head>
+  <body>
+    <div id="cesiumContainer"></div>
+    <canvas id="routeOverlay" class="route-overlay"></canvas>
+    <div class="vignette"></div>
+    <header class="title-card" id="titleCard">
+      <div class="eyebrow">TRAIL REPLAY · 3D TRACK</div>
+      <h1 id="activityName">载入轨迹中…</h1>
+      <div class="date" id="activityDate"></div>
+      <div class="intro-summary" id="introSummary"></div>
+    </header>
+    <section class="elevation-panel" id="elevationPanel">
+      <canvas id="elevationProfile" width="460" height="92"></canvas>
+      <div class="stats">
+        <div class="stat"><span id="distance">0.00</span><small>KM</small></div>
+        <div class="divider"></div>
+        <div class="stat"><span id="elapsed">00:00:00</span><small>用时</small></div>
+        <div class="divider"></div>
+        <div class="stat"><span id="altitude">0</span><small>海拔 M</small></div>
+      </div>
+    </section>
+    <aside class="persistent-title" id="persistentTitle">
+      <div class="persistent-eyebrow">FIT ACTIVITY</div>
+      <div class="persistent-name" id="persistentActivityName">载入活动标题…</div>
+      <div class="persistent-source" id="persistentSource"></div>
+    </aside>
+    <div class="progress"><div id="progressBar"></div></div>
+    <div class="legend"><i></i><span>已完成轨迹</span></div>
+    <section class="live-metrics" id="liveMetrics">
+      <div class="live-metric heart-metric">
+        <span class="metric-icon">♥</span>
+        <div><strong id="heartRate">--</strong><small>BPM · 心率</small></div>
+      </div>
+      <div class="metric-separator"></div>
+      <div class="live-metric pace-metric">
+        <span class="metric-icon">↗</span>
+        <div><strong id="pace">--'--&quot;</strong><small>配速 /KM</small></div>
+      </div>
+    </section>
+    <div class="terrain-badge">SRTM 3D · ESRI IMAGERY · 1.35×</div>
+    <div class="attribution">Imagery © Esri · Elevation SRTM / AWS Terrain Tiles</div>
+    <div id="error"></div>
+    <script src="/app.js"></script>
+  </body>
+</html>

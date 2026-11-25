@@ -1,0 +1,17 @@
+{
+  "track": {
+    "file": "examples/synthetic-track.kml",
+    "name": "合成演示路线"
+  },
+  "render": {
+    "output": "output/demo.mp4",
+    "seconds": 4,
+    "fps": 15,
+    "width": 1280,
+    "height": 720,
+    "no_terrain": true,
+    "no_imagery": true
+  },
+  "media": { "enabled": false },
+  "music": { "enabled": false }
+}

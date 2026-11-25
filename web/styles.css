@@ -1,0 +1,59 @@
+:root {
+  /* Overlay dimensions use a 1080px short-edge reference in either orientation. */
+  font-size: calc(100vmin / 108);
+  --metric-scale: 1;
+  --portrait-profile-width: 52rem;
+  --landscape-title-width: 46rem;
+  --landscape-overlay-top: 4rem;
+  --landscape-metrics-bottom: 10rem;
+  --portrait-overlay-top: 23rem;
+  --portrait-metrics-bottom: 22rem;
+  color-scheme: dark;
+  font-family: Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+}
+* { box-sizing: border-box; }
+html, body, #cesiumContainer { width: 100%; height: 100%; margin: 0; overflow: hidden; background: #071117; }
+.route-overlay { position: fixed; z-index: 2; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.cesium-viewer-bottom, .cesium-viewer-toolbar, .cesium-widget-credits { display: none !important; }
+.vignette { position: fixed; inset: 0; pointer-events: none; z-index: 2; background: linear-gradient(180deg, rgba(2,8,12,.62), transparent 27%, transparent 63%, rgba(2,8,12,.78)), radial-gradient(circle at center, transparent 48%, rgba(1,7,10,.48) 100%); }
+.title-card { position: fixed; z-index: 3; top: var(--landscape-overlay-top); left: 3.4rem; width: 50rem; height: 16.4rem; padding: 1.7rem 2.2rem; border: .1rem solid rgba(255,255,255,.13); border-radius: 1.4rem; background: rgba(3,14,19,.62); backdrop-filter: blur(1.2rem); box-shadow: 0 1.4rem 4.2rem rgba(0,0,0,.28); text-shadow: 0 .2rem 1.8rem #000; transition: opacity .25s; }
+.eyebrow { color: #ffd34d; letter-spacing: .22em; font-size: 1.4rem; font-weight: 800; }
+h1 { margin: .7rem 0 .4rem; max-width: 100%; font-size: 3rem; line-height: 1.15; font-weight: 760; overflow-wrap: anywhere; }
+.date { color: rgba(255,255,255,.7); font-size: 1.5rem; letter-spacing: .06em; }
+.intro-summary { margin-top: 1.2rem; color: white; font-size: 1.3rem; font-weight: 760; letter-spacing: .12em; }
+.elevation-panel { position: fixed; z-index: 3; top: var(--landscape-overlay-top); left: 3.4rem; width: 50rem; padding: 1.2rem 1.6rem 1.3rem; border-radius: 1.4rem; background: rgba(3,14,19,.56); backdrop-filter: blur(1.2rem); box-shadow: 0 1.4rem 4.2rem rgba(0,0,0,.28); opacity: 0; transition: opacity .25s; }
+.persistent-title { position: fixed; z-index: 3; top: var(--landscape-overlay-top); right: 3.8rem; width: var(--landscape-title-width); height: 16.4rem; display: flex; flex-direction: column; justify-content: center; padding: 3.8rem 2.4rem 2rem; border: .1rem solid rgba(255,255,255,.13); border-radius: 1.4rem; background: rgba(3,14,19,.62); backdrop-filter: blur(1.2rem); box-shadow: 0 1.4rem 4.2rem rgba(0,0,0,.28); text-shadow: 0 .2rem 1.4rem #000; overflow-wrap: anywhere; }
+.persistent-eyebrow { color: #ffd43b; font-size: 1.2rem; font-weight: 800; letter-spacing: .18em; }
+.persistent-name { margin-top: 1rem; color: #fff; font-size: 2.5rem; line-height: 1.22; font-weight: 760; }
+.persistent-source { margin-top: 1rem; color: rgba(255,255,255,.48); font-size: 1rem; letter-spacing: .08em; }
+#elevationProfile { display: block; width: 46rem; height: 9.2rem; }
+.stats { display: flex; align-items: center; justify-content: space-between; gap: 2.2rem; padding: .8rem .8rem 0; border-top: .1rem solid rgba(255,255,255,.12); }
+.stat { min-width: 11.2rem; }
+.stat span { display: block; font-size: 1.9rem; line-height: 1; font-variant-numeric: tabular-nums; font-weight: 760; }
+.stat small { display: block; margin-top: .8rem; color: rgba(255,255,255,.55); font-size: 1.1rem; letter-spacing: .14em; }
+.divider { width: .1rem; height: 3.5rem; background: rgba(255,255,255,.16); }
+.progress { position: fixed; z-index: 4; left: 0; right: 0; bottom: 0; height: .7rem; background: rgba(0,0,0,.5); }
+#progressBar { width: 0; height: 100%; background: linear-gradient(90deg, #ff7b35, #ffd83d); box-shadow: 0 0 1.8rem rgba(255,180,45,.72); }
+.legend { position: fixed; z-index: 3; right: 5.2rem; bottom: 5.8rem; display: flex; gap: .9rem; align-items: center; color: rgba(255,255,255,.7); font-size: 1.2rem; letter-spacing: .08em; }
+.legend i { width: 3.2rem; height: .4rem; border-radius: .4rem; background: #ffd33d; box-shadow: 0 0 1rem #ff8a32; }
+.live-metrics { position: fixed; z-index: 3; left: 3.4rem; bottom: var(--landscape-metrics-bottom); display: flex; flex-direction: column; align-items: stretch; gap: calc(1rem * var(--metric-scale)); width: calc(15.4rem * var(--metric-scale)); padding: calc(1.4rem * var(--metric-scale)) calc(1.5rem * var(--metric-scale)); border: .1rem solid rgba(255,255,255,.13); border-radius: calc(1.3rem * var(--metric-scale)); background: rgba(3,14,19,.68); backdrop-filter: blur(1.2rem); box-shadow: 0 1.2rem 3.8rem rgba(0,0,0,.3); opacity: 0; transition: opacity .25s; }
+.live-metric { display: flex; align-items: center; gap: calc(1rem * var(--metric-scale)); min-width: 0; }
+.live-metric .metric-icon { width: calc(2.5rem * var(--metric-scale)); color: #ff5a63; font-size: calc(2.1rem * var(--metric-scale)); line-height: 1; text-align: center; text-shadow: 0 0 1.3rem rgba(255,64,78,.55); }
+.pace-metric .metric-icon { color: #ffd43b; transform: rotate(-10deg); text-shadow: 0 0 1.3rem rgba(255,212,59,.5); }
+.live-metric strong { display: block; color: #fff; font-size: calc(2.2rem * var(--metric-scale)); line-height: 1; font-variant-numeric: tabular-nums; letter-spacing: .01em; }
+.live-metric small { display: block; margin-top: calc(.6rem * var(--metric-scale)); color: rgba(255,255,255,.55); font-size: calc(.9rem * var(--metric-scale)); font-weight: 700; letter-spacing: .12em; }
+.metric-separator { width: 100%; height: .1rem; background: rgba(255,255,255,.14); }
+.terrain-badge { position: fixed; z-index: 3; right: 3.8rem; top: 3rem; padding: .8rem 1.1rem; border: .1rem solid rgba(255,255,255,.2); border-radius: .7rem; background: rgba(3,14,19,.54); color: rgba(255,255,255,.7); font-size: 1rem; font-weight: 700; letter-spacing: .13em; }
+.attribution { position: fixed; z-index: 3; right: 1.8rem; bottom: 1.4rem; color: rgba(255,255,255,.58); font-size: .9rem; text-shadow: 0 .1rem .5rem #000; }
+#error { display: none; position: fixed; z-index: 20; inset: 20px; padding: 30px; background: #310d12; color: white; font-size: 16px; white-space: pre-wrap; }
+
+@media (orientation: portrait) {
+  .title-card, .elevation-panel { top: var(--portrait-overlay-top); width: min(var(--portrait-profile-width), calc(100vw - 6.8rem)); }
+  .title-card .date { font-size: 1.4rem; }
+  #elevationProfile { width: 100%; }
+  .persistent-title { top: var(--portrait-overlay-top); left: calc(5rem + var(--portrait-profile-width)); right: 3.4rem; width: auto; }
+  .live-metrics { left: 3.6rem; bottom: var(--portrait-metrics-bottom); }
+  .legend { right: 3rem; bottom: 6.6rem; }
+  .terrain-badge { top: 3.2rem; right: 2.8rem; }
+  .attribution { right: 1.4rem; max-width: 39rem; text-align: right; }
+}
