@@ -1,12 +1,16 @@
-# 3D 轨迹影片生成器
+# 3D Tracker · 3D 轨迹影片生成器
 
 这是一个带中文桌面界面的轨迹视频工具。导入 FIT 或 Garmin 风格的 KML，在窗口里选择横屏或竖屏、时长和画质，就能把运动路线做成带 3D 地形的 MP4。还可以加入沿途实拍片段和背景音乐。
 
-## 成片演示
+3D Tracker is an open-source desktop app for turning FIT and Garmin-style KML activity tracks into 3D route videos. Animate your route over terrain and satellite imagery, sync real footage by recording time, add music, and export a 720p or 1080p MP4 in landscape or portrait format.
 
-[![峨眉山27公里速攀比赛三维轨迹记录影片](https://i.ytimg.com/vi/IezjI8kOxuc/hqdefault.jpg)](https://youtu.be/IezjI8kOxuc)
+[English quick start](#english-quick-start) · [中文使用说明](#界面怎么用)
 
-[在 YouTube 观看峨眉山 27 公里速攀比赛三维轨迹记录影片](https://youtu.be/IezjI8kOxuc)
+## 成片演示 / Demo
+
+[![峨眉山 27 公里速攀比赛三维轨迹记录影片 / Mount Emei 27K Speed Climb Race 3D Route Replay](https://i.ytimg.com/vi/IezjI8kOxuc/hqdefault.jpg)](https://youtu.be/IezjI8kOxuc)
+
+[峨眉山 27 公里速攀比赛三维轨迹记录影片 / Mount Emei 27K Speed Climb Race · 3D Route Replay](https://youtu.be/IezjI8kOxuc)
 
 ## 界面怎么用
 
@@ -45,6 +49,17 @@ npm.cmd ci
 ```
 
 首次生成时，程序会下载轨迹附近的地形和卫星影像，因此需要网络。FIT/KML 文件在本机读取。底图请求按轨迹覆盖范围向 AWS Terrain Tiles 和 Esri World Imagery 获取瓦片，并缓存到 `web/terrain/` 和 `web/imagery/`。
+
+## English quick start
+
+The app runs from source and its desktop interface is in Chinese. Install Python 3.9+ with PySide6 support, Node.js 22.17+ with npm, a WebGL 2-capable Chrome, Chromium, or Edge browser, and FFmpeg with `libx264` encoding. Make sure `ffmpeg` and `ffprobe` are on your `PATH`. Then run the [installation commands for your OS](#安装并启动-gui) from the project directory to launch `gui_app.py`.
+
+1. In **活动信息** (Activity), click **选择文件** (Choose File) to import a FIT or Garmin-style KML file. You can try the bundled [synthetic KML track](examples/synthetic-track.kml). FIT recordings can also supply elevation, heart rate, and live pace data when available.
+2. In **影片设置** (Video Settings), choose landscape (**横屏**) or portrait (**竖屏**), a duration, and 720p or 1080p. The camera adjusts automatically to the route and frame.
+3. In **素材** (Media), you can choose a folder of footage and click **编辑影片片段** (Edit Clips) to mark in and out points and align clips to the route by recording time. You can also choose background music.
+4. In **输出** (Output), choose a destination and click **生成影片** (Export Video). When it finishes, click **打开影片** (Open Video) to watch the MP4.
+
+The app reads track files locally. The first render for an uncached area needs internet access to fetch terrain and imagery tiles for the area covered by the route.
 
 <details>
 <summary>命令行与批量生成</summary>
@@ -90,6 +105,8 @@ CLI 可使用 `--no-terrain --no-imagery` 跳过瓦片下载。
 
 </details>
 
-## 许可
+## 许可 / License
 
 项目源码和合成示例采用 [MIT 许可证](LICENSE)。CesiumJS、PySide6、FFmpeg 等依赖适用各自的许可。地图服务、瓦片及第三方媒体适用各自的授权条款。使用在线底图导出或发布视频前，请核对数据服务的使用和署名要求。
+
+The source code and synthetic example are under the [MIT License](LICENSE). Dependencies, map services, tiles, and third-party media are subject to their own terms. Check the applicable usage and attribution requirements before exporting or publishing videos with online basemaps.
