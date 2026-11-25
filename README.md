@@ -1,46 +1,47 @@
-# CesiumJS 轨迹视频
+# 3D 轨迹影片生成器
 
-把 FIT（推荐）或 Garmin 风格 KML 轨迹渲染成可重复生成的 CesiumJS 3D 动画，再由 Python 驱动 Chrome 截帧、FFmpeg 合成 MP4。FIT 可同时提供 GPS、海拔、心率和实时配速。
+这是一个带中文桌面界面的轨迹视频工具。导入 FIT 或 Garmin 风格的 KML，在窗口里选择横屏或竖屏、时长和画质，就能把运动路线做成带 3D 地形的 MP4。还可以加入沿途实拍片段和背景音乐。
 
-## 环境
+## 界面怎么用
+
+1. 在 **活动信息** 中点击「选择文件」导入轨迹。活动名称默认取自文件名，可以修改。推荐使用 FIT，文件中有记录时可显示心率、海拔和实时配速。
+2. 在 **影片设置** 中选横屏或竖屏、720P 或 1080P，再选影片时长。镜头距离会根据路线跨度、海拔和画幅自动调整。
+3. 可以在 **素材** 中选择实拍影片文件夹，再点「编辑影片片段」。在弹窗里播放影片并标记起点和终点，同一个文件可以选多段。还可以修正拍摄时间，便于与轨迹对齐。修正会保存在 `video_segments.txt` 中。背景音乐也在这一区选择。
+4. 在 **输出** 中选好保存位置，点「快速预览」检查路线和镜头，或点「生成影片」导出含所选素材的完整 MP4。生成完成后可点「打开影片」。
+
+第一次试用时，可以在「轨迹文件」中选择仓库自带的 [合成 KML 示例](examples/synthetic-track.kml)。
+
+## 安装并启动 GUI
+
+安装所需环境后，在项目根目录执行下方命令。
 
 - Python 3.9 或更高版本（须有可用的 PySide6）
 - Node.js 22.17 或更高版本，以及 npm
 - 支持 WebGL 2 的 Google Chrome、Chromium 或 Microsoft Edge
 - `PATH` 中可用的 `ffmpeg` 和 `ffprobe`，FFmpeg 需要支持 `libx264` 编码
 
-建议使用项目自己的 Python 环境安装依赖：
+**macOS / Linux**
 
 ```bash
 python3 -m venv .venv
-# macOS / Linux
 .venv/bin/python -m pip install -r requirements.txt
-# Windows
-.venv\Scripts\python -m pip install -r requirements.txt
-```
-
-安装 CesiumJS：
-
-```bash
 npm ci
-```
-
-## 图形界面
-
-启动“3D轨迹影片生成器”：
-
-```bash
-# macOS / Linux
 .venv/bin/python gui_app.py
-# Windows
-.venv\Scripts\python gui_app.py
 ```
 
-主界面只显示轨迹、活动名称、横竖屏、影片时长、720P/1080P、实拍片段、背景音乐和输出位置。
-地形、镜头、编码和混音参数使用内置预设。选择影片文件夹后，可在“编辑影片片段”中修正影片开始拍摄时间，并为同一影片添加多个起止区间。修正时间作为项目覆盖值保存到 `video_segments.txt`，不会改写原始影片。旧版三列清单仍然兼容。
-镜头距离会根据轨迹跨度、海拔、横竖画幅和当前已绘制的路线自动调整：紧凑路线自动拉近，长距离路线自动拉远，并保留画面安全边距。
+**Windows（PowerShell）**
 
-## 命令行
+```powershell
+py -3 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+npm.cmd ci
+.\.venv\Scripts\python.exe gui_app.py
+```
+
+首次生成时，程序会下载轨迹附近的地形和卫星影像，因此需要网络。FIT/KML 文件在本机读取。底图请求按轨迹覆盖范围向 AWS Terrain Tiles 和 Esri World Imagery 获取瓦片，并缓存到 `web/terrain/` 和 `web/imagery/`。
+
+<details>
+<summary>命令行与批量生成</summary>
 
 在项目根目录用自带的合成 KML 生成一段 4 秒的演示视频。此示例跳过下载地形和卫星影像：
 
@@ -48,7 +49,7 @@ npm ci
 .venv/bin/python generate_from_config.py examples/video_project.json
 ```
 
-结果保存在 `output/demo.mp4`。Windows 上把命令里的 `.venv/bin/python` 换成 `.venv\Scripts\python.exe`。
+结果保存在 `output/demo.mp4`。Windows 上把命令里的 `.venv/bin/python` 换成 `.\.venv\Scripts\python.exe`。
 
 用自己的轨迹生成 20 秒、1080p、30fps 视频。请把 `my-activity.fit` 改成实际文件路径：
 
@@ -63,9 +64,7 @@ npm ci
 .venv/bin/python prepare_track.py my-activity.fit -o web/track.json
 ```
 
-KML 仍然兼容，但只有 FIT 会提供心率和设备记录的实时速度/配速。
-
-## 配置驱动生成
+### 配置驱动生成
 
 可将 `examples/video_project.json` 复制到根目录作为 `video_project.json`，再填写轨迹路径和输出参数。配置中的相对路径以项目根目录为准。执行完整流程：
 
@@ -81,7 +80,9 @@ KML 仍然兼容，但只有 FIT 会提供心率和设备记录的实时速度/�
 .venv/bin/python generate_from_config.py video_project.json --mix-only
 ```
 
-渲染按帧推进。启用在线底图时，程序会按轨迹覆盖范围向 AWS Terrain Tiles 和 Esri World Imagery 请求瓦片，并将地形和影像缓存到 `web/terrain/` 和 `web/imagery/`。FIT/KML 文件由本机读取。CLI 可使用 `--no-terrain --no-imagery` 跳过下载。
+CLI 可使用 `--no-terrain --no-imagery` 跳过瓦片下载。
+
+</details>
 
 ## 许可
 
