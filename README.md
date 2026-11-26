@@ -4,7 +4,17 @@
 
 3D Tracker is an open-source desktop app for turning FIT and Garmin-style KML activity tracks into 3D route videos. Animate your route over terrain and satellite imagery, sync real footage by recording time, add music, and export a 720p or 1080p MP4 in landscape or portrait format.
 
-[English quick start](#english-quick-start) · [中文使用说明](#界面怎么用)
+[下载 macOS 版](#下载并安装-macos-版) · [中文使用说明](#界面怎么用) · [English quick start](#english-quick-start)
+
+## 下载并安装 macOS 版
+
+适用于运行 **macOS 26 或更新版本的 Apple 芯片 Mac**。安装包已内置 Python、PySide6、CesiumJS、Chromium 和 FFmpeg。
+
+1. 打开 [GitHub Releases](https://github.com/smallworld-network-wupeng/3d-tracker/releases)，在 `v0.1.0` 的 **Assets** 中下载 `3D-Tracker-0.1.0-macOS-arm64.zip`（约 236 MB）。
+2. 双击 ZIP 解压，把 **3D Tracker.app** 拖到「应用程序」，再双击打开。
+3. 此预览版使用临时签名，尚未经过 Apple 公证。如果 macOS 提示无法验证开发者，请先核对发布页上的 SHA-256，再参考 [Apple 的首次打开说明](https://support.apple.com/zh-cn/102445)。
+
+初次试用可下载 [合成 KML 示例](https://raw.githubusercontent.com/smallworld-network-wupeng/3d-tracker/v0.1.0/examples/synthetic-track.kml)，在「活动信息」中导入。选 720P、设置时长和输出文件夹，再点「生成影片」。首次渲染新区域时需要联网下载地形和影像。
 
 ## 成片演示 / Demo
 
@@ -23,7 +33,7 @@
 
 第一次试用时，可以在「轨迹文件」中选择仓库自带的 [合成 KML 示例](examples/synthetic-track.kml)。
 
-## 安装并启动 GUI
+## 从源码安装并启动 GUI
 
 安装所需环境后，在项目根目录执行下方命令。
 
@@ -54,7 +64,9 @@ npm.cmd ci
 
 ## English quick start
 
-The app runs from source. Install Python 3.9+ with PySide6 support, Node.js 22.17+ with npm, a WebGL 2-capable Chrome, Chromium, or Edge browser, and FFmpeg with `libx264` encoding. Make sure `ffmpeg` and `ffprobe` are on your `PATH`. Then run the [installation commands for your OS](#安装并启动-gui) from the project directory to launch `gui_app.py`.
+The desktop preview runs on **Apple Silicon Macs with macOS 26 or later**. Download `3D-Tracker-0.1.0-macOS-arm64.zip` (about 236 MB) under **Assets** for `v0.1.0` in [GitHub Releases](https://github.com/smallworld-network-wupeng/3d-tracker/releases). Unzip it, move **3D Tracker.app** to Applications, then open it. The preview is ad-hoc signed and is not notarized. If macOS cannot verify the developer, check the release's SHA-256 and refer to [Apple's first-launch instructions](https://support.apple.com/en-us/102445).
+
+To run from source, follow the [source installation instructions](#从源码安装并启动-gui).
 
 The desktop interface starts in Chinese or English based on your system language. Use the **English** or **中文** button in the top-right corner to switch.
 
@@ -66,8 +78,6 @@ The desktop interface starts in Chinese or English based on your system language
 The app reads track files locally. The first render for an uncached area needs internet access to fetch terrain and imagery tiles for the area covered by the route.
 
 ## 打包 macOS 版本
-
-Apple Silicon 预览版可从 [GitHub Releases](https://github.com/smallworld-network-wupeng/3d-tracker/releases) 下载。应用内置 Python/PySide6、CesiumJS、FFmpeg/ffprobe 和 Chromium。当前二进制使用 macOS 26 构建的 Homebrew FFmpeg，要求 macOS 26 或更新版本。
 
 本机构建需要已安装的 Homebrew FFmpeg，以及 [Ungoogled Chromium 157.0.8103.78-1.1 的 arm64 镜像](https://github.com/ungoogled-software/ungoogled-chromium-macos/releases/tag/157.0.8103.78-1.1)。挂载镜像后，将其中的 `Chromium.app` 路径传给构建脚本。第三方许可、构建配方和对应源码地址随应用附带。
 
