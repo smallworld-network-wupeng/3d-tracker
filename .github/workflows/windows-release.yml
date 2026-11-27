@@ -44,7 +44,15 @@ jobs:
           python -m pip install -r requirements.txt PySide6==6.10.3 "fitdecode==0.11.0" "Pillow==11.3.0" "pillow-heif==1.1.1" tzdata PyInstaller==6.22.3
           npm ci --no-audit --no-fund
           python -m unittest discover -s tests -v
+      - uses: actions/cache/restore@v5
+        id: ffmpeg
+        with:
+          path: |
+            build/windows/dependencies/bin
+            build/windows/sources
+          key: ffmpeg-windows-x64-${{ hashFiles('scripts/build_windows_ffmpeg.sh') }}
       - uses: msys2/setup-msys2@v2
+        if: steps.ffmpeg.outputs.cache-hit != 'true'
         with:
           msystem: UCRT64
           update: true
@@ -54,8 +62,16 @@ jobs:
             mingw-w64-ucrt-x86_64-nasm
             mingw-w64-ucrt-x86_64-pkgconf
       - name: Build FFmpeg and ffprobe with libx264
+        if: steps.ffmpeg.outputs.cache-hit != 'true'
         shell: msys2 {0}
         run: bash scripts/build_windows_ffmpeg.sh
+      - uses: actions/cache/save@v5
+        if: steps.ffmpeg.outputs.cache-hit != 'true'
+        with:
+          path: |
+            build/windows/dependencies/bin
+            build/windows/sources
+          key: ${{ steps.ffmpeg.outputs.cache-primary-key }}
       - name: Build the portable Windows ZIP and the third-party source ZIP
         run: ./scripts/build_windows_release.ps1 -Tag $env:RELEASE_TAG
       - name: Export and verify a video from the extracted ZIP

@@ -80,7 +80,7 @@ builds and reverse engineer the application as needed to debug those changes.
 "@ | Set-Content -LiteralPath (Join-Path $notices 'SOURCE.md') -Encoding utf8
 
 $env:TRACKER_WINDOWS_DEPENDENCIES = $dependencies
-python -m PyInstaller --noconfirm --clean packaging/windows.spec
+python -m PyInstaller --noconfirm --clean --workpath build/pyinstaller-windows packaging/windows.spec
 $app = Join-Path $root 'dist/3D Tracker'
 $examples = Join-Path $app 'examples'
 New-Item -ItemType Directory -Force $examples | Out-Null
