@@ -9,11 +9,11 @@ import json
 import subprocess
 import sys
 from collections import Counter
-from dataclasses import replace
+from dataclasses import asdict, replace
 from pathlib import Path
 
 from PySide6.QtCore import QDate, QDateTime, QLocale, QProcess, QRectF, QSettings, QSignalBlocker, QTime, QTimer, Qt, QUrl
-from PySide6.QtGui import QAction, QColor, QDesktopServices, QFont, QPainter
+from PySide6.QtGui import QAction, QColor, QDesktopServices, QFont, QKeySequence, QPainter
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import (
@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QDateTimeEdit,
+    QDoubleSpinBox,
     QFileDialog,
     QFrame,
     QGridLayout,
@@ -50,20 +51,33 @@ from PySide6.QtWidgets import (
 )
 
 from app_config import (
+    PROJECT_FILE_SUFFIX,
     SUPPORTED_MUSIC_SUFFIXES,
     SUPPORTED_TRACK_SUFFIXES,
+    VIDEO_GROUP_WINDOW,
     Segment,
+    build_editor_project,
     build_project_config,
     display_creation_time,
     format_timecode,
     list_video_files,
     normalize_creation_time,
+    output_dimensions,
     parse_timecode,
-    read_segment_list,
+    popup_safe_bounds,
+    read_editor_project,
     safe_filename,
+    write_editor_project,
     write_project_config,
-    write_segment_list,
 )
+from compose_media_video import group_segments, load_configured_segments
+from photo_editor import PhotoEditorDialog
+from photo_events import (
+    PhotoEvent,
+    activity_wall_time,
+    list_photo_files,
+)
+from prepare_track import prepare
 from runtime_paths import (
     IS_BUNDLED,
     RESOURCE_ROOT,
@@ -155,11 +169,12 @@ QGroupBox {
   border-radius: 6px; margin-top: 12px; padding: 15px 12px 10px 12px; background: #ffffff;
 }
 QGroupBox::title { subcontrol-origin: margin; left: 12px; padding: 0 7px; color: #222a31; }
-QLineEdit, QComboBox, QDateTimeEdit {
+QLineEdit, QComboBox, QAbstractSpinBox {
   min-height: 34px; border: 1px solid #bfc5ca; border-radius: 5px;
-  padding: 0 9px; background: #fbfcfc; selection-background-color: #f2b633;
+  padding: 0 9px; background: #fbfcfc; color: #20262d;
+  selection-background-color: #f2b633; selection-color: #20262d;
 }
-QLineEdit:focus, QComboBox:focus, QDateTimeEdit:focus {
+QLineEdit:focus, QComboBox:focus, QAbstractSpinBox:focus {
   border: 1px solid #e7a91d; background: white;
 }
 QPushButton {
@@ -168,6 +183,9 @@ QPushButton {
 }
 QPushButton:hover { background: #ffffff; border-color: #8f979e; }
 QPushButton:pressed { background: #e8ebed; }
+QPushButton#openProjectButton, QPushButton#saveProjectButton {
+  min-height: 44px; min-width: 130px; font-size: 17px; font-weight: 700;
+}
 QPushButton#primaryButton {
   min-height: 44px; min-width: 175px; font-size: 17px; font-weight: 700;
   background: #f5b82e; border-color: #e6a716;
@@ -852,15 +870,6 @@ class ClipEditorDialog(QDialog):
                 + "\n".join(missing_times),
             )
             return
-        try:
-            write_segment_list(self.media_directory / "video_segments.txt", self.segments)
-        except (OSError, ValueError) as error:
-            QMessageBox.critical(
-                self,
-                self.t("无法保存片段", "Could Not Save Clips"),
-                self.error_text(error),
-            )
-            return
         super().accept()
 
     def closeEvent(self, event) -> None:
@@ -897,9 +906,10 @@ class MainWindow(QMainWindow):
         self.language = system_language()
         self.setWindowTitle(APP_NAMES[self.language])
         self.resize(1080, 760)
-        self.setMinimumSize(900, 680)
         self.settings = QSettings("OpenAI-Codex", "3DTrackMovieGenerator")
         self.segments: list[Segment] = []
+        self.photo_events: list[PhotoEvent] = []
+        self.project_path: Path | None = None
         self.process: QProcess | None = None
         self.progress_dialog: RenderDialog | None = None
         self.expected_output: Path | None = None
@@ -916,7 +926,7 @@ class MainWindow(QMainWindow):
     def error_text(self, error: Exception | str) -> str:
         return localized_error(self.language, error)
 
-    def _capture_form(self) -> dict[str, str]:
+    def _capture_form(self) -> dict[str, str | float]:
         return {
             "track": self.track_edit.text(),
             "name": self.name_edit.text(),
@@ -924,7 +934,9 @@ class MainWindow(QMainWindow):
             "duration": self.duration_combo.currentText(),
             "quality": self.quality.value(),
             "media": self.media_edit.text(),
+            "photos": self.photos_edit.text(),
             "music": self.music_edit.text(),
+            "music_start_offset": self.music_start_offset.value(),
             "output": self.output_edit.text(),
         }
 
@@ -932,7 +944,9 @@ class MainWindow(QMainWindow):
         state = self._capture_form()
         self.language = "en" if self.language == "zh" else "zh"
         app_name = APP_NAMES[self.language]
-        self.setWindowTitle(app_name)
+        self.setWindowTitle(
+            f"{app_name} — {self.project_path.stem}" if self.project_path else app_name
+        )
         QApplication.instance().setApplicationName(app_name)
         old_central = self.takeCentralWidget()
         if old_central:
@@ -949,15 +963,31 @@ class MainWindow(QMainWindow):
             self.duration_combo.setCurrentText(self.t(f"{seconds}秒", f"{seconds} sec"))
         self.quality.set_value(state["quality"])
         self.media_edit.setText(state["media"])
+        self.photos_edit.setText(state["photos"])
         self.music_edit.setText(state["music"])
+        self.music_start_offset.setValue(float(state["music_start_offset"]))
         self.output_edit.setText(state["output"])
         self._update_summary()
 
     def _build_menu(self) -> None:
         file_menu = self.menuBar().addMenu(self.t("文件", "File"))
         clear_action = QAction(self.t("新建", "New"), self)
+        clear_action.setShortcut(QKeySequence.StandardKey.New)
         clear_action.triggered.connect(self._clear_form)
         file_menu.addAction(clear_action)
+        open_action = QAction(self.t("打开项目…", "Open Project…"), self)
+        open_action.setShortcut(QKeySequence.StandardKey.Open)
+        open_action.triggered.connect(self._open_project)
+        file_menu.addAction(open_action)
+        file_menu.addSeparator()
+        save_action = QAction(self.t("保存项目", "Save Project"), self)
+        save_action.setShortcut(QKeySequence.StandardKey.Save)
+        save_action.triggered.connect(self._save_project)
+        file_menu.addAction(save_action)
+        save_as_action = QAction(self.t("项目另存为…", "Save Project As…"), self)
+        save_as_action.setShortcut(QKeySequence.StandardKey.SaveAs)
+        save_as_action.triggered.connect(lambda: self._save_project(save_as=True))
+        file_menu.addAction(save_as_action)
         file_menu.addSeparator()
         exit_action = QAction(self.t("退出", "Exit"), self)
         exit_action.triggered.connect(self.close)
@@ -972,8 +1002,8 @@ class MainWindow(QMainWindow):
                     f"About {APP_NAMES['en']}",
                 ),
                 self.t(
-                    "导入 FIT/KML 轨迹、实拍片段和背景音乐，生成 3D 轨迹影片。",
-                    "Import a FIT/KML track, video clips, and background music to create a 3D track movie.",
+                    "导入 FIT/KML 轨迹、实拍片段、照片和背景音乐，生成 3D 轨迹影片。",
+                    "Import a FIT/KML track, video clips, photos, and background music to create a 3D track movie.",
                 ),
             )
         )
@@ -1060,17 +1090,44 @@ class MainWindow(QMainWindow):
         self.summary_label.setObjectName("summary")
         self.edit_segments_button = QPushButton(self.t("编辑影片片段", "Edit Video Clips"))
         self.edit_segments_button.clicked.connect(self._edit_segments)
+        self.photos_edit = QLineEdit()
+        self.photos_edit.setClearButtonEnabled(True)
+        self.photos_edit.textChanged.connect(self._update_photo_summary)
+        photos_button = QPushButton(self.t("选择文件夹", "Choose Folder"))
+        photos_button.clicked.connect(self._choose_photo_directory)
+        self.photo_summary = QLabel()
+        self.photo_summary.setObjectName("summary")
+        self.edit_photos_button = QPushButton(self.t("编辑照片", "Edit Photos"))
+        self.edit_photos_button.clicked.connect(self._edit_photos)
         self.music_edit = QLineEdit()
         music_button = QPushButton(self.t("选择音乐", "Choose Music"))
         music_button.clicked.connect(self._choose_music)
+        self.music_start_offset = QDoubleSpinBox()
+        self.music_start_offset.setRange(0.0, 86400.0)
+        self.music_start_offset.setDecimals(1)
+        self.music_start_offset.setSingleStep(0.5)
+        self.music_start_offset.setSuffix(self.t(" 秒", " sec"))
+        self.music_start_offset.setToolTip(self.t(
+            "背景音乐在影片开始后多少秒开始播放",
+            "How many seconds after the movie starts the background music should begin",
+        ))
         media.addWidget(QLabel(self.t("影片文件夹", "Video Folder")), 0, 0)
         media.addWidget(self.media_edit, 0, 1)
         media.addWidget(media_button, 0, 2)
-        media.addWidget(self.summary_label, 1, 1)
-        media.addWidget(self.edit_segments_button, 1, 2)
+        media.addWidget(self.edit_segments_button, 0, 3)
+        media.addWidget(QLabel(self.t("照片文件夹", "Photo Folder")), 1, 0)
+        media.addWidget(self.photos_edit, 1, 1)
+        media.addWidget(photos_button, 1, 2)
+        media.addWidget(self.edit_photos_button, 1, 3)
         media.addWidget(QLabel(self.t("背景音乐", "Background Music")), 2, 0)
         media.addWidget(self.music_edit, 2, 1)
         media.addWidget(music_button, 2, 2)
+        media.addWidget(QLabel(self.t("开始偏移", "Start Offset")), 2, 3)
+        media.addWidget(self.music_start_offset, 2, 4)
+        summaries = QHBoxLayout()
+        summaries.addWidget(self.summary_label, 1)
+        summaries.addWidget(self.photo_summary, 1)
+        media.addLayout(summaries, 3, 1, 1, 3)
         root.addWidget(media_box)
 
         output_box = QGroupBox(self.t("输出", "Output"))
@@ -1088,16 +1145,128 @@ class MainWindow(QMainWindow):
         footer = QHBoxLayout()
         self.status_label = QLabel(self.t("●  请选择轨迹文件", "●  Select a track file"))
         self.status_label.setObjectName("success")
+        self.open_project_button = QPushButton(self.t("打开项目…", "Open Project…"))
+        self.open_project_button.setObjectName("openProjectButton")
+        self.open_project_button.setToolTip(self.t(
+            "打开已保存的 .3dtrack 项目文件",
+            "Open a saved .3dtrack project file",
+        ))
+        self.open_project_button.clicked.connect(self._open_project)
+        self.save_project_button = QPushButton(self.t("保存项目", "Save Project"))
+        self.save_project_button.setObjectName("saveProjectButton")
+        self.save_project_button.clicked.connect(self._save_project)
         generate_button = QPushButton(self.t("生成影片", "Generate Movie"))
         generate_button.setObjectName("primaryButton")
         generate_button.clicked.connect(lambda: self._start_render(preview=False))
         footer.addWidget(self.status_label)
         footer.addStretch()
+        footer.addWidget(self.open_project_button)
+        footer.addWidget(self.save_project_button)
         footer.addWidget(generate_button)
         root.addLayout(footer)
 
     def _last_directory(self, key: str, fallback: str = "") -> str:
         return str(self.settings.value(key, fallback))
+
+    def _project_document(self, path: Path) -> dict:
+        def optional_path(value: str) -> Path | None:
+            return Path(value.strip()).expanduser() if value.strip() else None
+
+        return build_editor_project(
+            project_path=path,
+            track_file=optional_path(self.track_edit.text()),
+            activity_name=self.name_edit.text(),
+            orientation=self.orientation.value(),
+            quality=self.quality.value(),
+            seconds=self._duration(),
+            output_directory=optional_path(self.output_edit.text()),
+            media_directory=optional_path(self.media_edit.text()),
+            segments=self.segments,
+            photo_directory=optional_path(self.photos_edit.text()),
+            photo_events=[asdict(event) for event in self.photo_events],
+            music_file=optional_path(self.music_edit.text()),
+            music_start_offset_seconds=self.music_start_offset.value(),
+        )
+
+    def _save_project(self, _checked: bool = False, *, save_as: bool = False) -> bool:
+        path = None if save_as else self.project_path
+        if path is None:
+            default_directory = self.output_edit.text().strip() or self._last_directory(
+                "projectDirectory", str(default_output_directory())
+            )
+            default_name = safe_filename(self.name_edit.text()) + PROJECT_FILE_SUFFIX
+            filename, _ = QFileDialog.getSaveFileName(
+                self,
+                self.t("保存项目", "Save Project"),
+                str(Path(default_directory) / default_name),
+                self.t("3D 轨迹项目 (*.3dtrack)", "3D Track projects (*.3dtrack)"),
+            )
+            if not filename:
+                return False
+            path = Path(filename)
+            if path.suffix.lower() != PROJECT_FILE_SUFFIX:
+                path = path.with_suffix(PROJECT_FILE_SUFFIX)
+        try:
+            write_editor_project(path, self._project_document(path))
+        except (OSError, ValueError) as error:
+            QMessageBox.warning(
+                self,
+                self.t("无法保存项目", "Could Not Save Project"),
+                self.error_text(error),
+            )
+            return False
+        self.project_path = path.resolve()
+        self.settings.setValue("projectDirectory", str(self.project_path.parent))
+        self.setWindowTitle(f"{APP_NAMES[self.language]} — {self.project_path.stem}")
+        return True
+
+    def _open_project(self) -> None:
+        filename, _ = QFileDialog.getOpenFileName(
+            self,
+            self.t("打开项目", "Open Project"),
+            self._last_directory("projectDirectory"),
+            self.t("3D 轨迹项目 (*.3dtrack)", "3D Track projects (*.3dtrack)"),
+        )
+        if not filename:
+            return
+        path = Path(filename)
+        try:
+            document = read_editor_project(path)
+            photo_events = []
+            for index, item in enumerate(document["photos"]["events"], 1):
+                if not isinstance(item, dict):
+                    raise ValueError(f"项目文件中的第 {index} 个照片设置必须是 JSON 对象")
+                try:
+                    event = PhotoEvent(**item)
+                    event.validate()
+                except (TypeError, ValueError) as error:
+                    raise ValueError(f"项目文件中的第 {index} 个照片设置无效: {error}") from error
+                photo_events.append(event)
+        except (OSError, ValueError) as error:
+            QMessageBox.warning(
+                self,
+                self.t("无法打开项目", "Could Not Open Project"),
+                self.error_text(error),
+            )
+            return
+
+        self.track_edit.setText(document["track"]["file"])
+        self.name_edit.setText(str(document["track"].get("name", "")))
+        self.orientation.set_value(document["movie"]["orientation"])
+        seconds = document["movie"]["seconds"]
+        self.duration_combo.setCurrentText(self.t(f"{seconds:g}秒", f"{seconds:g} sec"))
+        self.quality.set_value(document["movie"]["quality"])
+        self.media_edit.setText(document["video"]["directory"])
+        self.segments = document["video"]["segments"]
+        self.photos_edit.setText(document["photos"]["directory"])
+        self.photo_events = photo_events
+        self.music_edit.setText(document["music"]["file"])
+        self.music_start_offset.setValue(float(document["music"].get("start_offset_seconds", 0.0)))
+        self.output_edit.setText(document["output"]["directory"])
+        self.project_path = path.resolve()
+        self.settings.setValue("projectDirectory", str(self.project_path.parent))
+        self.setWindowTitle(f"{APP_NAMES[self.language]} — {self.project_path.stem}")
+        self._update_summary()
 
     def _choose_track(self) -> None:
         filename, _ = QFileDialog.getOpenFileName(
@@ -1124,18 +1293,11 @@ class MainWindow(QMainWindow):
         if not directory:
             return
         path = Path(directory)
+        current_directory = self.media_edit.text().strip()
+        if not current_directory or path != Path(current_directory):
+            self.segments = []
         self.media_edit.setText(str(path))
         self.settings.setValue("mediaDirectory", str(path))
-        segment_file = path / "video_segments.txt"
-        try:
-            self.segments = read_segment_list(segment_file)
-        except ValueError as error:
-            self.segments = []
-            QMessageBox.warning(
-                self,
-                self.t("片段配置无法读取", "Could Not Read Clip Configuration"),
-                self.error_text(error),
-            )
         self._update_summary()
 
     def _choose_music(self) -> None:
@@ -1152,6 +1314,84 @@ class MainWindow(QMainWindow):
             path = Path(filename)
             self.music_edit.setText(str(path))
             self.settings.setValue("musicDirectory", str(path.parent))
+
+    def _photo_directory(self) -> Path | None:
+        value = self.photos_edit.text().strip()
+        return Path(value).expanduser() if value else None
+
+    def _choose_photo_directory(self) -> None:
+        directory = QFileDialog.getExistingDirectory(
+            self, self.t("选择照片文件夹", "Choose Photo Folder"),
+            self._last_directory("photoDirectory"),
+        )
+        if directory:
+            if directory != self.photos_edit.text().strip():
+                self.photo_events = []
+            self.photos_edit.setText(directory)
+            self.settings.setValue("photoDirectory", directory)
+
+    def _update_photo_summary(self) -> None:
+        directory = self._photo_directory()
+        self.edit_photos_button.setEnabled(bool(directory and directory.is_dir()))
+        if directory and directory.is_dir():
+            count = len(list_photo_files(directory))
+            enabled = sum(event.enabled for event in self.photo_events)
+            message = self.t(f"已找到 {count} 张照片，已勾选 {enabled} 张",
+                             f"Found {count} photos; {enabled} checked")
+        elif directory:
+            message = self.t("照片文件夹不存在", "Photo folder does not exist")
+        else:
+            message = self.t("尚未选择照片文件夹（可选）", "No photo folder selected (optional)")
+        self.photo_summary.setText(message)
+
+    def _edit_photos(self) -> None:
+        directory = self._photo_directory()
+        if directory is None:
+            return
+        try:
+            files = list_photo_files(directory)
+        except OSError as error:
+            QMessageBox.warning(self, self.t("无法打开照片", "Could Not Open Photos"), str(error))
+            return
+        if not files and not self.photo_events:
+            QMessageBox.information(self, self.t("没有找到照片", "No Photos Found"), self.t(
+                "这个文件夹中没有 JPG、JPEG、PNG、HEIC 或 HEIF 照片。",
+                "This folder contains no JPG, JPEG, PNG, HEIC, or HEIF photos.",
+            ))
+            return
+        activity = None
+        track = Path(self.track_edit.text().strip())
+        if track.is_file():
+            try:
+                metadata = prepare(track, None)
+                activity = tuple(activity_wall_time(metadata[key]) for key in ("start", "end"))
+            except (OSError, ValueError, RuntimeError, SyntaxError) as error:
+                QMessageBox.warning(
+                    self, self.t("无法读取活动时间", "Could Not Read Activity Time"), self.error_text(error)
+                )
+        groups = []
+        if self.segments:
+            video_dir = Path(self.media_edit.text().strip())
+            try:
+                clips, errors, _ = load_configured_segments(self.segments, video_dir)
+                if errors:
+                    raise ValueError("\n".join(errors))
+                groups = list(enumerate(group_segments(clips, VIDEO_GROUP_WINDOW), 1))
+            except (OSError, ValueError, subprocess.SubprocessError) as error:
+                QMessageBox.warning(self, self.t(
+                    "预计时间无法计入影片片段", "Estimates Will Exclude Video Clips"
+                ), self.error_text(error))
+        try:
+            seconds = self._duration()
+        except ValueError as error:
+            QMessageBox.warning(self, self.t("请检查影片时长", "Check Movie Duration"), self.error_text(error))
+            return
+        bounds = popup_safe_bounds(*output_dimensions(self.orientation.value(), self.quality.value()))
+        dialog = PhotoEditorDialog(directory, files, self.photo_events, activity, groups, seconds, bounds,
+                                   self, language=self.language)
+        if dialog.exec() == QDialog.Accepted:
+            self.photo_events = dialog.events
+            self._update_photo_summary()
 
     def _choose_output_directory(self) -> None:
         directory = QFileDialog.getExistingDirectory(
@@ -1192,6 +1432,7 @@ class MainWindow(QMainWindow):
             self._update_summary()
 
     def _update_summary(self) -> None:
+        self._update_photo_summary()
         directory = Path(self.media_edit.text().strip()) if self.media_edit.text().strip() else None
         count = len(list_video_files(directory)) if directory else 0
         if count:
@@ -1232,13 +1473,15 @@ class MainWindow(QMainWindow):
         track = Path(self.track_edit.text().strip())
         media_directory = Path(self.media_edit.text().strip()) if self.media_edit.text().strip() else None
         music_file = Path(self.music_edit.text().strip()) if self.music_edit.text().strip() else None
-        output_directory = Path(self.output_edit.text().strip())
-        if not output_directory:
+        photo_directory = self._photo_directory()
+        output_value = self.output_edit.text().strip()
+        if not output_value:
             raise ValueError(self.t("请选择输出位置", "Choose an output location."))
+        output_directory = Path(output_value)
         output_directory.mkdir(parents=True, exist_ok=True)
-        segment_list = media_directory / "video_segments.txt" if media_directory else None
-        if self.segments and segment_list:
-            write_segment_list(segment_list, self.segments)
+        if photo_directory and not preview:
+            if not photo_directory.is_dir():
+                raise ValueError(self.t("照片文件夹不存在", "Photo folder does not exist"))
         config, final_output = build_project_config(
             track_file=track,
             activity_name=self.name_edit.text(),
@@ -1247,9 +1490,11 @@ class MainWindow(QMainWindow):
             seconds=self._duration(),
             output_directory=output_directory,
             media_directory=media_directory,
-            segment_list=segment_list,
             segments=self.segments,
+            photo_directory=photo_directory,
+            photo_events=[asdict(event) for event in self.photo_events],
             music_file=music_file,
+            music_start_offset_seconds=self.music_start_offset.value(),
             preview=preview,
         )
         suffix = "preview-project.json" if preview else "project.json"
@@ -1282,6 +1527,8 @@ class MainWindow(QMainWindow):
             )
             return
         try:
+            if not preview and not self._save_project():
+                return
             self._preflight()
             _config, config_path, final_output = self._build_config(preview)
         except (OSError, ValueError) as error:
@@ -1398,8 +1645,15 @@ class MainWindow(QMainWindow):
         self.track_edit.clear()
         self.name_edit.clear()
         self.media_edit.clear()
+        self.photos_edit.clear()
         self.music_edit.clear()
+        self.music_start_offset.setValue(0.0)
         self.segments = []
+        self.photo_events = []
+        self.project_path = None
+        self.setWindowTitle(APP_NAMES[self.language])
+        self.orientation.set_value("landscape")
+        self.quality.set_value("1080p")
         self.duration_combo.setCurrentText(self.t("30秒", "30 sec"))
         self._update_summary()
 

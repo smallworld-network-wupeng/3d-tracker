@@ -119,7 +119,7 @@ def extract_summary(kml_path: Path) -> dict:
 
 def prepare_kml(
     kml_path: Path,
-    output_path: Path,
+    output_path: Path | None,
     sample_seconds: float = 5.0,
     simplify_meters: float = 2.0,
     name_override: Optional[str] = None,
@@ -174,8 +174,9 @@ def prepare_kml(
         **extract_summary(kml_path),
     }
     payload = {"metadata": metadata, "points": points}
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(json.dumps(payload, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+    if output_path is not None:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(json.dumps(payload, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
     return metadata
 
 
@@ -192,7 +193,7 @@ def fit_values(message) -> dict:
 
 def prepare_fit(
     fit_path: Path,
-    output_path: Path,
+    output_path: Path | None,
     sample_seconds: float = 5.0,
     simplify_meters: float = 2.0,
     name_override: Optional[str] = None,
@@ -279,7 +280,12 @@ def prepare_fit(
     start_local = raw[0]["timestamp"].astimezone(local_zone)
     end_local = raw[-1]["timestamp"].astimezone(local_zone)
     session_distance = session.get("total_distance")
-    session_duration = session.get("total_timer_time", session.get("total_elapsed_time"))
+    session_duration = session.get("total_timer_time")
+    if session_duration is None:
+        session_duration = session.get("total_elapsed_time")
+    reported_duration_seconds = (
+        float(session_duration) if session_duration is not None else (raw[-1]["timestamp"] - start).total_seconds()
+    )
     metadata = {
         "name": name_override or session.get("sport_profile_name") or fit_path.stem,
         "source": fit_path.name,
@@ -298,20 +304,22 @@ def prepare_fit(
         "center": [round((min(lons) + max(lons)) / 2, 7), round((min(lats) + max(lats)) / 2, 7)],
         "bounds": [round(min(lons), 7), round(min(lats), 7), round(max(lons), 7), round(max(lats), 7)],
         "reported_distance_km": round(float(session_distance) / 1000, 3) if session_distance is not None else round(cumulative / 1000, 3),
-        "reported_duration": format_duration(float(session_duration)) if session_duration is not None else format_duration((end_local - start_local).total_seconds()),
+        "reported_duration": format_duration(reported_duration_seconds),
+        "reported_duration_seconds": reported_duration_seconds,
         "reported_gain_m": float(session["total_ascent"]) if session.get("total_ascent") is not None else None,
         "avg_heart_rate": session.get("avg_heart_rate"),
         "max_heart_rate": session.get("max_heart_rate"),
     }
     payload = {"metadata": metadata, "points": points, "metrics": metrics}
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(json.dumps(payload, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+    if output_path is not None:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(json.dumps(payload, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
     return metadata
 
 
 def prepare(
     source_path: Path,
-    output_path: Path,
+    output_path: Path | None,
     sample_seconds: float = 5.0,
     simplify_meters: float = 2.0,
     name_override: Optional[str] = None,

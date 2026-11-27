@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 from dataclasses import dataclass
 from datetime import datetime
@@ -14,6 +15,14 @@ from zoneinfo import ZoneInfo
 SUPPORTED_TRACK_SUFFIXES = {".fit", ".kml"}
 SUPPORTED_VIDEO_SUFFIXES = {".mp4", ".mov", ".m4v"}
 SUPPORTED_MUSIC_SUFFIXES = {".mp3", ".wav", ".m4a", ".aac", ".flac"}
+INTRO_RATIO = 0.07
+OUTRO_RATIO = 0.20
+VIDEO_GROUP_WINDOW = 600
+DEFAULT_FPS = 30
+SEGMENT_CONFIG_FILENAME = "video_segments.json"
+SEGMENT_CONFIG_SCHEMA_VERSION = 1
+PROJECT_FILE_SUFFIX = ".3dtrack"
+PROJECT_FILE_SCHEMA_VERSION = 1
 
 
 @dataclass(frozen=True)
@@ -32,6 +41,8 @@ class Segment:
     def validate(self) -> None:
         if not self.file or Path(self.file).name != self.file:
             raise ValueError("影片文件名无效")
+        if not math.isfinite(self.start) or not math.isfinite(self.end):
+            raise ValueError("片段时间必须是有限数字")
         if self.start < 0:
             raise ValueError("起点不能小于 0")
         if self.end <= self.start:
@@ -103,38 +114,111 @@ def parse_timecode(value: str) -> float:
 def read_segment_list(path: Path) -> list[Segment]:
     if not path.is_file():
         return []
-    segments: list[Segment] = []
-    for line_number, raw_line in enumerate(path.read_text(encoding="utf-8-sig").splitlines(), 1):
-        line = raw_line.strip()
-        if not line or line.startswith("#"):
-            continue
-        parts = [part.strip() for part in line.replace("｜", "|").split("|")]
-        if len(parts) not in (3, 4):
-            raise ValueError(f"第 {line_number} 行格式错误")
-        creation_time = normalize_creation_time(parts[3]) if len(parts) == 4 and parts[3] else None
-        segment = Segment(
-            parts[0], parse_timecode(parts[1]), parse_timecode(parts[2]), creation_time
+
+    try:
+        document = json.loads(path.read_text(encoding="utf-8-sig"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            f"JSON 格式错误（第 {exc.lineno} 行，第 {exc.colno} 列）"
+        ) from exc
+    if not isinstance(document, dict):
+        raise ValueError("片段配置的最外层必须是 JSON 对象")
+    if document.get("schema_version") != SEGMENT_CONFIG_SCHEMA_VERSION:
+        raise ValueError(
+            f"不支持的片段配置版本: {document.get('schema_version')!r}"
         )
-        segment.validate()
-        segments.append(segment)
+    videos = document.get("videos")
+    if not isinstance(videos, list):
+        raise ValueError("片段配置中的 videos 必须是数组")
+
+    segments: list[Segment] = []
+    filenames: set[str] = set()
+    for video_index, video in enumerate(videos, 1):
+        location = f"第 {video_index} 个视频"
+        if not isinstance(video, dict):
+            raise ValueError(f"{location}必须是 JSON 对象")
+        filename = video.get("file")
+        if not isinstance(filename, str):
+            raise ValueError(f"{location}的 file 必须是字符串")
+        if not filename or Path(filename).name != filename:
+            raise ValueError(f"{location}的影片文件名无效")
+        if filename in filenames:
+            raise ValueError(f"{location}重复定义了影片 {filename}")
+        filenames.add(filename)
+        raw_creation_time = video.get("creation_time")
+        if raw_creation_time is not None and not isinstance(raw_creation_time, str):
+            raise ValueError(f"{location}的 creation_time 必须是字符串或 null")
+        try:
+            creation_time = (
+                normalize_creation_time(raw_creation_time) if raw_creation_time else None
+            )
+        except ValueError as exc:
+            raise ValueError(f"{location}的 creation_time: {exc}") from exc
+        intervals = video.get("segments")
+        if not isinstance(intervals, list):
+            raise ValueError(f"{location}的 segments 必须是数组")
+        if not intervals:
+            raise ValueError(f"{location}的 segments 不能为空")
+        for segment_index, interval in enumerate(intervals, 1):
+            interval_location = f"{location}的第 {segment_index} 个片段"
+            if not isinstance(interval, dict):
+                raise ValueError(f"{interval_location}必须是 JSON 对象")
+            start = interval.get("start_seconds")
+            end = interval.get("end_seconds")
+            if not _is_json_number(start) or not _is_json_number(end):
+                raise ValueError(
+                    f"{interval_location}的 start_seconds 和 end_seconds 必须是数字"
+                )
+            segment = Segment(filename, float(start), float(end), creation_time)
+            try:
+                segment.validate()
+            except ValueError as exc:
+                raise ValueError(f"{interval_location}: {exc}") from exc
+            segments.append(segment)
     return segments
+
+
+def _is_json_number(value: object) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
 def write_segment_list(path: Path, segments: list[Segment]) -> None:
     for segment in segments:
         segment.validate()
     path.parent.mkdir(parents=True, exist_ok=True)
-    lines = ["# 由 3D轨迹影片生成器 保存", ""]
-    current_file = None
+    videos: list[dict] = []
+    grouped: dict[str, list[Segment]] = {}
     for segment in sorted(segments, key=lambda item: (item.file.casefold(), item.start, item.end)):
-        if current_file is not None and segment.file != current_file:
-            lines.append("")
-        line = f"{segment.file} | {format_timecode(segment.start)} | {format_timecode(segment.end)}"
-        if segment.creation_time:
-            line += f" | {normalize_creation_time(segment.creation_time)}"
-        lines.append(line)
-        current_file = segment.file
-    path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+        grouped.setdefault(segment.file, []).append(segment)
+    for filename, file_segments in grouped.items():
+        creation_times = {
+            normalize_creation_time(segment.creation_time)
+            for segment in file_segments
+            if segment.creation_time
+        }
+        if len(creation_times) > 1:
+            raise ValueError(f"{filename} 的多个片段使用了不同的拍摄时间")
+        video = {
+            "file": filename,
+            "segments": [
+                {
+                    "start_seconds": segment.start,
+                    "end_seconds": segment.end,
+                }
+                for segment in file_segments
+            ],
+        }
+        if creation_times:
+            video["creation_time"] = next(iter(creation_times))
+        videos.append(video)
+    document = {
+        "schema_version": SEGMENT_CONFIG_SCHEMA_VERSION,
+        "videos": videos,
+    }
+    path.write_text(
+        json.dumps(document, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
 
 
 def list_video_files(directory: Path) -> list[Path]:
@@ -143,7 +227,11 @@ def list_video_files(directory: Path) -> list[Path]:
     return sorted(
         (
             path for path in directory.iterdir()
-            if path.is_file() and path.suffix.lower() in SUPPORTED_VIDEO_SUFFIXES
+            if (
+                path.is_file()
+                and not path.name.startswith(".")
+                and path.suffix.lower() in SUPPORTED_VIDEO_SUFFIXES
+            )
         ),
         key=lambda path: path.name.casefold(),
     )
@@ -153,6 +241,188 @@ def safe_filename(value: str) -> str:
     cleaned = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", value.strip())
     cleaned = re.sub(r"\s+", " ", cleaned).strip(" .")
     return cleaned or "轨迹影片"
+
+
+def _project_path_value(value: Path | None, project_directory: Path) -> str:
+    """Store project-local paths relatively so a project directory can be moved."""
+
+    if value is None:
+        return ""
+    resolved = value.expanduser().resolve()
+    try:
+        return resolved.relative_to(project_directory.resolve()).as_posix()
+    except ValueError:
+        return str(resolved)
+
+
+def _resolve_project_path(value: object, project_directory: Path, location: str) -> str:
+    if not isinstance(value, str):
+        raise ValueError(f"项目文件中的 {location} 必须是字符串")
+    if not value:
+        return ""
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        path = project_directory / path
+    return str(path.resolve())
+
+
+def build_editor_project(
+    *,
+    project_path: Path,
+    track_file: Path | None,
+    activity_name: str,
+    orientation: str,
+    quality: str,
+    seconds: float,
+    output_directory: Path | None,
+    media_directory: Path | None,
+    segments: list[Segment],
+    photo_directory: Path | None,
+    photo_events: list[dict],
+    music_file: Path | None,
+    music_start_offset_seconds: float,
+) -> dict:
+    """Build the single, user-facing project document used by the editor."""
+
+    if orientation not in {"landscape", "portrait"}:
+        raise ValueError("不支持的画面方向")
+    if quality not in {"720p", "1080p"}:
+        raise ValueError("不支持的输出画质")
+    if seconds <= 0:
+        raise ValueError("影片时长必须大于 0")
+    if music_start_offset_seconds < 0:
+        raise ValueError("背景音乐开始偏移不能小于 0")
+    for segment in segments:
+        segment.validate()
+
+    root = project_path.expanduser().resolve().parent
+    return {
+        "schema_version": PROJECT_FILE_SCHEMA_VERSION,
+        "kind": "3d-track-project",
+        "track": {
+            "file": _project_path_value(track_file, root),
+            "name": activity_name.strip(),
+        },
+        "movie": {
+            "orientation": orientation,
+            "quality": quality,
+            "seconds": float(seconds),
+        },
+        "video": {
+            "directory": _project_path_value(media_directory, root),
+            "segments": [
+                {
+                    "file": segment.file,
+                    "start_seconds": segment.start,
+                    "end_seconds": segment.end,
+                    "creation_time": segment.creation_time,
+                }
+                for segment in segments
+            ],
+        },
+        "photos": {
+            "directory": _project_path_value(photo_directory, root),
+            "events": photo_events,
+        },
+        "music": {
+            "file": _project_path_value(music_file, root),
+            "start_offset_seconds": float(music_start_offset_seconds),
+        },
+        "output": {
+            "directory": _project_path_value(output_directory, root),
+        },
+    }
+
+
+def read_editor_project(path: Path) -> dict:
+    """Read and strictly validate the current project-file format."""
+
+    try:
+        document = json.loads(path.read_text(encoding="utf-8-sig"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            f"项目文件 JSON 格式错误（第 {exc.lineno} 行，第 {exc.colno} 列）"
+        ) from exc
+    if not isinstance(document, dict):
+        raise ValueError("项目文件的最外层必须是 JSON 对象")
+    if document.get("kind") != "3d-track-project":
+        raise ValueError("这不是 3D 轨迹影片项目文件")
+    if document.get("schema_version") != PROJECT_FILE_SCHEMA_VERSION:
+        raise ValueError(f"不支持的项目文件版本: {document.get('schema_version')!r}")
+
+    for key in ("track", "movie", "video", "photos", "music", "output"):
+        if not isinstance(document.get(key), dict):
+            raise ValueError(f"项目文件中的 {key} 必须是 JSON 对象")
+    movie = document["movie"]
+    if not isinstance(document["track"].get("name", ""), str):
+        raise ValueError("项目文件中的活动名称必须是字符串")
+    if movie.get("orientation") not in {"landscape", "portrait"}:
+        raise ValueError("项目文件中的画面方向无效")
+    if movie.get("quality") not in {"720p", "1080p"}:
+        raise ValueError("项目文件中的输出画质无效")
+    seconds = movie.get("seconds")
+    if not _is_json_number(seconds) or seconds <= 0:
+        raise ValueError("项目文件中的影片时长无效")
+    music_offset = document["music"].get("start_offset_seconds", 0.0)
+    if not _is_json_number(music_offset) or music_offset < 0:
+        raise ValueError("项目文件中的背景音乐开始偏移无效")
+
+    raw_segments = document["video"].get("segments")
+    raw_events = document["photos"].get("events")
+    if not isinstance(raw_segments, list):
+        raise ValueError("项目文件中的 video.segments 必须是数组")
+    if not isinstance(raw_events, list):
+        raise ValueError("项目文件中的 photos.events 必须是数组")
+    segments = []
+    for index, item in enumerate(raw_segments, 1):
+        if not isinstance(item, dict):
+            raise ValueError(f"项目文件中的第 {index} 个视频片段必须是 JSON 对象")
+        try:
+            segment = Segment(
+                file=item["file"],
+                start=float(item["start_seconds"]),
+                end=float(item["end_seconds"]),
+                creation_time=item.get("creation_time"),
+            )
+            segment.validate()
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError(f"项目文件中的第 {index} 个视频片段无效: {exc}") from exc
+        segments.append(segment)
+
+    root = path.expanduser().resolve().parent
+    track = document["track"]
+    music = document["music"]
+    output = document["output"]
+    video = document["video"]
+    photos = document["photos"]
+    result = dict(document)
+    result["track"] = dict(track, file=_resolve_project_path(track.get("file", ""), root, "track.file"))
+    result["video"] = dict(
+        video,
+        directory=_resolve_project_path(video.get("directory", ""), root, "video.directory"),
+        segments=segments,
+    )
+    result["photos"] = dict(
+        photos,
+        directory=_resolve_project_path(photos.get("directory", ""), root, "photos.directory"),
+    )
+    result["music"] = dict(
+        music,
+        file=_resolve_project_path(music.get("file", ""), root, "music.file"),
+    )
+    result["output"] = dict(
+        output,
+        directory=_resolve_project_path(output.get("directory", ""), root, "output.directory"),
+    )
+    return result
+
+
+def write_editor_project(path: Path, document: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(document, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
 
 
 def output_dimensions(orientation: str, quality: str) -> tuple[int, int]:
@@ -197,9 +467,11 @@ def build_project_config(
     seconds: float,
     output_directory: Path,
     media_directory: Path | None = None,
-    segment_list: Path | None = None,
     segments: list[Segment] | None = None,
+    photo_directory: Path | None = None,
+    photo_events: list[dict] | None = None,
     music_file: Path | None = None,
+    music_start_offset_seconds: float = 0.0,
     preview: bool = False,
 ) -> tuple[dict, Path]:
     """Build the existing pipeline's JSON while keeping expert values internal."""
@@ -210,6 +482,8 @@ def build_project_config(
         raise ValueError("请填写活动名称")
     if seconds <= 0:
         raise ValueError("影片时长必须大于 0")
+    if music_start_offset_seconds < 0:
+        raise ValueError("背景音乐开始偏移不能小于 0")
 
     output_directory = output_directory.resolve()
     work_directory = output_directory / ".3d_track_work"
@@ -217,13 +491,19 @@ def build_project_config(
     width, height = output_dimensions(orientation, quality)
 
     selected_segments = segments or []
-    media_enabled = bool(
+    selected_photos = photo_events or []
+    clips_enabled = bool(
         not preview
         and media_directory
         and media_directory.is_dir()
-        and segment_list
         and selected_segments
     )
+    photos_enabled = bool(
+        not preview
+        and photo_directory
+        and any(event.get("enabled", False) for event in selected_photos)
+    )
+    media_enabled = clips_enabled or photos_enabled
     music_enabled = bool(not preview and music_file and music_file.is_file())
     has_postprocessing = media_enabled or music_enabled
 
@@ -235,7 +515,7 @@ def build_project_config(
 
     is_portrait = orientation == "portrait"
     render_seconds = min(8.0, seconds) if preview else float(seconds)
-    render_fps = 15 if preview else 30
+    render_fps = 15 if preview else DEFAULT_FPS
     if preview:
         width, height = ((960, 540) if not is_portrait else (540, 960))
 
@@ -251,8 +531,8 @@ def build_project_config(
         "terrain_exaggeration": 1.35,
         "imagery_max_level": 14,
         "imagery_margin_deg": 0.15,
-        "intro_ratio": 0.07,
-        "outro_ratio": 0.20,
+        "intro_ratio": INTRO_RATIO,
+        "outro_ratio": OUTRO_RATIO,
         "camera_pitch_deg": -57.0,
         "camera_range_m": 11500.0 if is_portrait else 9500.0,
         "auto_camera_range": True,
@@ -300,11 +580,21 @@ def build_project_config(
         "render": render,
         "media": {
             "enabled": media_enabled,
-            "directory": str(media_directory.resolve()) if media_directory else "",
-            "segment_list": str(segment_list.resolve()) if segment_list else "",
+            "directory": str(media_directory.resolve()) if clips_enabled else "",
+            "segments": [
+                {
+                    "file": segment.file,
+                    "start_seconds": segment.start,
+                    "end_seconds": segment.end,
+                    "creation_time": segment.creation_time,
+                }
+                for segment in selected_segments
+            ] if clips_enabled else [],
+            "photo_directory": str(photo_directory.resolve()) if photos_enabled else "",
+            "photos": selected_photos if photos_enabled else [],
             "output": str(media_output),
             "report": str(work_directory / f"{stem}-media-events.json"),
-            "group_window_seconds": 600,
+            "group_window_seconds": VIDEO_GROUP_WINDOW,
             "popup_width": popup_width,
             "popup_height": popup_height,
             "popup_border": 12 if is_portrait else 10,
@@ -318,7 +608,7 @@ def build_project_config(
             "output": str(final_output),
             "target_lufs": -18.0,
             "music_volume": 1.0,
-            "start_offset_seconds": 0.0,
+            "start_offset_seconds": float(music_start_offset_seconds),
             "duck_threshold": 0.04,
             "duck_ratio": 4.0,
             "duck_attack_ms": 80.0,

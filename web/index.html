@@ -13,41 +13,74 @@
     <div id="cesiumContainer"></div>
     <canvas id="routeOverlay" class="route-overlay"></canvas>
     <div class="vignette"></div>
-    <header class="title-card" id="titleCard">
-      <div class="eyebrow">TRAIL REPLAY · 3D TRACK</div>
-      <h1 id="activityName">载入轨迹中…</h1>
-      <div class="date" id="activityDate"></div>
-      <div class="intro-summary" id="introSummary"></div>
-    </header>
-    <section class="elevation-panel" id="elevationPanel">
-      <canvas id="elevationProfile" width="460" height="92"></canvas>
-      <div class="stats">
-        <div class="stat"><span id="distance">0.00</span><small>KM</small></div>
-        <div class="divider"></div>
-        <div class="stat"><span id="elapsed">00:00:00</span><small>用时</small></div>
-        <div class="divider"></div>
-        <div class="stat"><span id="altitude">0</span><small>海拔 M</small></div>
-      </div>
-    </section>
-    <aside class="persistent-title" id="persistentTitle">
-      <div class="persistent-eyebrow">FIT ACTIVITY</div>
-      <div class="persistent-name" id="persistentActivityName">载入活动标题…</div>
-      <div class="persistent-source" id="persistentSource"></div>
-    </aside>
-    <div class="progress"><div id="progressBar"></div></div>
-    <div class="legend"><i></i><span>已完成轨迹</span></div>
-    <section class="live-metrics" id="liveMetrics">
-      <div class="live-metric heart-metric">
-        <span class="metric-icon">♥</span>
-        <div><strong id="heartRate">--</strong><small>BPM · 心率</small></div>
-      </div>
-      <div class="metric-separator"></div>
-      <div class="live-metric pace-metric">
-        <span class="metric-icon">↗</span>
-        <div><strong id="pace">--'--&quot;</strong><small>配速 /KM</small></div>
-      </div>
-    </section>
-    <div class="terrain-badge">SRTM 3D · ESRI IMAGERY · 1.35×</div>
+    <div class="activity-hud" id="activityHud">
+      <header class="title-card" id="titleCard">
+        <div class="eyebrow">TRAIL REPLAY · 3D TRACK</div>
+        <h1 id="activityName">载入轨迹中…</h1>
+        <div class="date" id="activityDate"></div>
+        <div class="intro-summary" id="introSummary"></div>
+      </header>
+      <section class="elevation-panel" id="elevationPanel">
+        <canvas id="elevationProfile" width="460" height="92"></canvas>
+        <div class="stats">
+          <div class="stat"><span id="distance">0.00</span><small>KM</small></div>
+          <div class="divider"></div>
+          <div class="stat"><span id="elapsed">00:00:00</span><small>用时</small></div>
+          <div class="divider"></div>
+          <div class="stat"><span id="altitude">0</span><small>海拔 M</small></div>
+        </div>
+      </section>
+      <aside class="persistent-title" id="persistentTitle">
+        <div class="persistent-eyebrow">FIT ACTIVITY</div>
+        <div class="persistent-name" id="persistentActivityName">载入活动标题…</div>
+        <div class="persistent-source" id="persistentSource"></div>
+      </aside>
+      <div class="progress"><div id="progressBar"></div></div>
+      <div class="legend"><i></i><span>已完成轨迹</span></div>
+      <section class="live-metrics" id="liveMetrics">
+        <div class="live-metric heart-metric">
+          <span class="metric-icon">♥</span>
+          <div><strong id="heartRate">--</strong><small>BPM · 心率</small></div>
+        </div>
+        <div class="metric-separator"></div>
+        <div class="live-metric pace-metric">
+          <span class="metric-icon">↗</span>
+          <div><strong id="pace">--'--&quot;</strong><small>配速 /KM</small></div>
+        </div>
+      </section>
+      <div class="terrain-badge">SRTM 3D · ESRI IMAGERY · 1.35×</div>
+    </div>
+    <div class="outro" id="outro" hidden>
+      <div class="outro-backdrop" aria-hidden="true"></div>
+      <section class="outro-card" aria-labelledby="outroActivityName">
+        <header class="outro-heading">
+          <div class="outro-kicker">活动总览</div>
+          <h2 id="outroActivityName"></h2>
+        </header>
+        <dl class="outro-metrics">
+          <div class="outro-metric outro-distance">
+            <dt>总距离</dt>
+            <dd><span id="outroDistance"></span> <small>km</small></dd>
+          </div>
+          <div class="outro-metric outro-secondary">
+            <dt>平均心率</dt>
+            <dd><span id="outroHeartRate"></span> <small>bpm</small></dd>
+          </div>
+          <div class="outro-metric outro-secondary">
+            <dt>平均配速</dt>
+            <dd><span id="outroPace"></span> <small>/km</small></dd>
+          </div>
+          <div class="outro-metric outro-secondary">
+            <dt>总时长</dt>
+            <dd><span id="outroDuration"></span></dd>
+          </div>
+          <div class="outro-metric outro-secondary">
+            <dt>累计爬升</dt>
+            <dd><span id="outroGain"></span> <small>m</small></dd>
+          </div>
+        </dl>
+      </section>
+    </div>
     <div class="attribution">Imagery © Esri · Elevation SRTM / AWS Terrain Tiles</div>
     <div id="error"></div>
     <script src="/app.js"></script>

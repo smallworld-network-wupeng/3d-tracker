@@ -50,6 +50,8 @@ def collect_notices(notices: Path, binaries: set[Path], ffmpeg: Path) -> None:
     python_license = Path(sys.base_prefix) / "lib" / f"python{sys.version_info.major}.{sys.version_info.minor}" / "LICENSE.txt"
     shutil.copy2(python_license, notices / "Python-LICENSE.txt")
     fitdecode = distribution_license("fitdecode", notices)
+    pillow = distribution_license("Pillow", notices)
+    pillow_heif = distribution_license("pillow-heif", notices)
     pyinstaller = distribution_license("pyinstaller", notices)
     qt = distribution_license("PySide6", notices)
     cesium_package = PROJECT / "node_modules" / "cesium"
@@ -88,6 +90,8 @@ recorded in `Homebrew/ffmpeg-build.txt`.
 - Qt Multimedia's FFmpeg n7.1.3 (LGPL): https://ffmpeg.org/releases/ffmpeg-7.1.3.tar.xz
 - Python {sys.version.split()[0]}: https://www.python.org/ftp/python/{sys.version.split()[0]}/
 - Fitdecode {fitdecode} (MIT): https://pypi.org/project/fitdecode/{fitdecode}/#files
+- Pillow {pillow} (MIT-CMU): https://pypi.org/project/Pillow/{pillow}/#files
+- pillow-heif {pillow_heif} (BSD-3-Clause) and its bundled libraries: https://github.com/bigcat88/pillow_heif/tree/v{pillow_heif}
 - PyInstaller {pyinstaller} (GPL with bootloader exception): https://github.com/pyinstaller/pyinstaller/tree/v{pyinstaller}
 - CesiumJS {cesium} (Apache-2.0 and third-party terms): https://github.com/CesiumGS/cesium/tree/{cesium}
 

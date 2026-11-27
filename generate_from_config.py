@@ -87,11 +87,16 @@ def main() -> None:
         *entrypoint("compose_media_video.py", "--compose-media-video"), "--base", str(render["output"]),
         "--base-seconds", str(render["seconds"]), "--track-json", str(WORK_ROOT / "web" / "track.json"),
         "--render-config", str(WORK_ROOT / "web" / "render-config.json"),
-        "--media-dir", str(media.get("directory", "")), "--segment-list", str(media.get("segment_list", "")),
+        "--project-config", str(config_path),
         "--output", str(media.get("output", "output/final.mp4")),
         "--report", str(media.get("report", "output/media-events.json")),
         "--fps", str(render["fps"]),
     ]
+    for key, flag in (
+        ("directory", "--media-dir"), ("photo_directory", "--photo-dir"),
+    ):
+        if media.get(key):
+            compose_command.extend([flag, str(media[key])])
     add_options(compose_command, media, {
         "group_window_seconds": "--group-window", "popup_width": "--popup-width",
         "popup_height": "--popup-height", "popup_border": "--popup-border",

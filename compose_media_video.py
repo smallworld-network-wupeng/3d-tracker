@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Insert time-matched GoPro clip groups into a rendered Cesium route video."""
+"""Insert time-matched videos and photos into a rendered Cesium route video."""
 
 from __future__ import annotations
 
@@ -7,10 +7,18 @@ import argparse
 import json
 import subprocess
 import tempfile
+from bisect import bisect_left
 from datetime import datetime, timedelta
+from itertools import groupby
 from pathlib import Path
 from typing import Optional
 from zoneinfo import ZoneInfo
+
+from photo_events import (
+    PHOTO_READ_ERRORS, PhotoEvent, activity_wall_time, frame_photo, load_photo_image, photo_time,
+    read_capture_time, read_photo_events,
+)
+from app_config import Segment, read_segment_list
 
 
 def run(command: list[str]) -> None:
@@ -99,64 +107,54 @@ def matched_groups(media_dir: Path, activity_start: datetime, activity_end: date
     return groups
 
 
-def parse_timecode(value: str) -> float:
-    parts = value.strip().split(":")
-    if len(parts) not in (2, 3):
-        raise ValueError(f"时间码应为 MM:SS 或 HH:MM:SS，而不是 {value!r}")
-    try:
-        numbers = [float(part) for part in parts]
-    except ValueError as exc:
-        raise ValueError(f"无法识别时间码 {value!r}") from exc
-    if any(number < 0 for number in numbers) or numbers[-1] >= 60 or (len(numbers) == 3 and numbers[-2] >= 60):
-        raise ValueError(f"时间码超出范围: {value!r}")
-    if len(numbers) == 2:
-        return numbers[0] * 60 + numbers[1]
-    return numbers[0] * 3600 + numbers[1] * 60 + numbers[2]
-
-
 def load_segment_list(list_path: Path, media_dir: Path) -> tuple[list[dict], list[str], list[str]]:
+    return load_json_segment_list(list_path, media_dir)
+
+
+def load_json_segment_list(
+    list_path: Path, media_dir: Path,
+) -> tuple[list[dict], list[str], list[str]]:
+    """Load and validate the versioned JSON segment configuration."""
+
+    try:
+        configured_segments = read_segment_list(list_path)
+    except (OSError, ValueError) as exc:
+        return [], [str(exc)], []
+
+    return load_configured_segments(configured_segments, media_dir)
+
+
+def load_configured_segments(
+    configured_segments, media_dir: Path,
+) -> tuple[list[dict], list[str], list[str]]:
+    """Validate project-owned clip selections against their source videos."""
+
     segments = []
     errors = []
     warnings = []
-    section = ""
-    for line_number, raw_line in enumerate(list_path.read_text(encoding="utf-8-sig").splitlines(), 1):
-        line = raw_line.strip()
-        if not line:
-            continue
-        if line.startswith("#"):
-            section = line[1:].strip()
-            continue
-        parts = [part.strip() for part in line.replace("｜", "|").split("|")]
-        if len(parts) not in (1, 3, 4) or not parts[0]:
-            errors.append(f"第 {line_number} 行格式错误: {raw_line}")
-            continue
-        path = media_dir / parts[0]
-        if path.name != parts[0] or not path.is_file():
-            errors.append(f"第 {line_number} 行找不到视频: {parts[0]}")
+    for index, configured in enumerate(configured_segments, 1):
+        path = media_dir / configured.file
+        if path.name != configured.file or not path.is_file():
+            errors.append(f"第 {index} 个片段找不到视频: {configured.file}")
             continue
         try:
-            creation_override = parts[3] if len(parts) == 4 else ""
-            item = probe(path, require_creation_time=not creation_override)
+            item = probe(path, require_creation_time=not configured.creation_time)
             source_created = (
-                parse_creation_time(creation_override) if creation_override else item["created"]
+                parse_creation_time(configured.creation_time)
+                if configured.creation_time else item["created"]
             )
-            start = 0.0
-            end = item["duration"]
-            if len(parts) in (3, 4):
-                if not parts[1] or not parts[2]:
-                    raise ValueError("开始时间和结束时间必须同时填写")
-                start = parse_timecode(parts[1])
-                end = parse_timecode(parts[2])
-                if end <= start:
-                    raise ValueError(f"结束时间 {parts[2]} 必须晚于开始时间 {parts[1]}")
-                if start >= item["duration"]:
-                    raise ValueError(f"开始时间 {parts[1]} 超过视频长度 {item['duration']:.3f}s")
-                if end > item["duration"]:
-                    warnings.append(
-                        f"第 {line_number} 行 {parts[0]}: 结束时间 {parts[2]} 超过视频长度 "
-                        f"{item['duration']:.3f}s，已截到文件末尾"
-                    )
-                    end = item["duration"]
+            start = configured.start
+            end = configured.end
+            if start >= item["duration"]:
+                raise ValueError(
+                    f"开始时间 {start:.3f}s 超过视频长度 {item['duration']:.3f}s"
+                )
+            if end > item["duration"]:
+                warnings.append(
+                    f"第 {index} 个片段 {configured.file}: 结束时间 {end:.3f}s 超过视频长度 "
+                    f"{item['duration']:.3f}s，已截到文件末尾"
+                )
+                end = item["duration"]
             segments.append({
                 "path": path,
                 "source_created": source_created,
@@ -164,11 +162,11 @@ def load_segment_list(list_path: Path, media_dir: Path) -> tuple[list[dict], lis
                 "start": start,
                 "end": end,
                 "duration": end - start,
-                "section": section,
-                "line": line_number,
+                "section": "",
+                "line": index,
             })
         except ValueError as exc:
-            errors.append(f"第 {line_number} 行 {parts[0]}: {exc}")
+            errors.append(f"第 {index} 个片段 {configured.file}: {exc}")
     return segments, errors, warnings
 
 
@@ -183,10 +181,132 @@ def group_segments(segments: list[dict], window_seconds: int) -> list[list[dict]
 
 
 def local_wall_time(value: str) -> datetime:
-    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    if parsed.tzinfo is not None:
-        parsed = parsed.astimezone(ZoneInfo("Asia/Shanghai")).replace(tzinfo=None)
-    return parsed
+    return activity_wall_time(value)
+
+
+def load_photos(list_path: Path, directory: Path, start: datetime, end: datetime):
+    if not list_path.is_file():
+        raise ValueError(f"找不到照片清单 / Photo list not found: {list_path}")
+    return load_configured_photos(read_photo_events(list_path), directory, start, end)
+
+
+def load_configured_photos(events, directory: Path, start: datetime, end: datetime):
+    """Validate project-owned photo settings against their source files."""
+
+    photos, errors, warnings = [], [], []
+    for event in events:
+        if not event.enabled:
+            continue
+        path = directory / event.file
+        try:
+            if not path.is_file():
+                raise ValueError("找不到照片 / Photo file not found")
+            created = photo_time(event.capture_time) if event.capture_time else None
+            if event.placement == "timeline":
+                if created is None:
+                    created = read_capture_time(path)
+                if created is None:
+                    raise ValueError("缺少拍摄时间 / Missing capture time")
+                if not start <= created <= end:
+                    warnings.append(f"{event.file}: 超出活动时间，已跳过 / Outside activity time, skipped")
+                    continue
+            photos.append({
+                "path": path, "created": created, "duration": event.duration,
+                "framing": event.framing, "placement": event.placement,
+            })
+        except PHOTO_READ_ERRORS as exc:
+            errors.append(f"{event.file}: {exc}")
+    return photos, errors, warnings
+
+
+def plan_media_events(groups, photos, start, end, base_seconds, render_config, fps):
+    """Split clip groups at timed photos and attach other photos to the last video."""
+    timeline_photos = [photo for photo in photos if photo.get("placement", "timeline") == "timeline"]
+    after_video_photos = [photo for photo in photos if photo.get("placement") == "end"]
+    photo_times = sorted({photo["created"] for photo in timeline_photos})
+    photo_anchors = set(photo_times)
+
+    def photo_interval(clip):
+        created = clip["created"]
+        return bisect_left(photo_times, created), created in photo_anchors
+
+    pending = []
+    for index, group in groups:
+        for _, partition in groupby(group, key=photo_interval):
+            clips = list(partition)
+            pending.append((clips[0]["created"], 0, index, "", "video", clips))
+    for photo in timeline_photos:
+        name = photo["path"].name
+        pending.append((photo["created"], 1, name.casefold(), name, "photo", [photo]))
+
+    intro_ratio = float(render_config.get("intro_ratio", 0.07))
+    outro_ratio = float(render_config.get("outro_ratio", 0.07))
+    track_ratio = max(0.001, 1.0 - intro_ratio - outro_ratio)
+    activity_seconds = (end - start).total_seconds()
+    last_frame = max(0, round(base_seconds * fps) - 1)
+    planned = []
+    last_video_index = None
+    for created, _, index, _, kind, items in sorted(pending, key=lambda entry: entry[:4]):
+        offset = (created - start).total_seconds()
+        progress = max(0.0, min(1.0, offset / activity_seconds)) if activity_seconds > 0 else 0.0
+        base_time = base_seconds * (intro_ratio + track_ratio * progress)
+        if photos:
+            base_time = min(last_frame, max(0, round(base_time * fps))) / fps
+        event = {
+            "type": kind,
+            "created": created.isoformat(),
+            "track_progress": progress,
+            "base_time": base_time,
+            "files": [str(item["path"]) for item in items],
+        }
+        if kind == "photo":
+            event.update(file=items[0]["path"].name, framing=items[0]["framing"])
+        else:
+            last_video_index = len(planned)
+            event.update(group=index, segments=[
+                {
+                    "file": item["path"].name,
+                    "start": item.get("start", 0.0),
+                    "end": item.get("end", item["duration"]),
+                    "duration": item["duration"],
+                    "section": item.get("section", ""),
+                    "line": item.get("line"),
+                }
+                for item in items
+            ])
+        planned.append((event, items))
+    if last_video_index is not None and after_video_photos:
+        anchor = planned[last_video_index][0]
+        attached = []
+        for photo in sorted(after_video_photos, key=lambda item: (item["path"].name.casefold(), item["path"].name)):
+            created = photo["created"]
+            event = {
+                "type": "photo",
+                "created": created.isoformat() if created is not None else None,
+                "track_progress": anchor["track_progress"],
+                "base_time": anchor["base_time"],
+                "files": [str(photo["path"])],
+                "file": photo["path"].name,
+                "framing": photo["framing"],
+                "placement": "end",
+            }
+            attached.append((event, [photo]))
+        planned[last_video_index + 1:last_video_index + 1] = attached
+    return planned
+
+
+def normalize_photo(photo, output: Path, fps: int, width: int, height: int):
+    image = load_photo_image(photo["path"], max(width, height))
+    still = output.with_suffix(".png")
+    frame_photo(image, (width, height), photo["framing"]).save(still)
+    frames = max(1, round(photo["duration"] * fps))
+    run([
+        "ffmpeg", "-y", "-loglevel", "warning", "-loop", "1", "-framerate", str(fps),
+        "-i", str(still), "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo",
+        "-t", f"{frames / fps:.9f}", "-c:v", "libx264", "-preset", "veryfast",
+        "-crf", "19", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", str(output),
+    ])
+    return frames / fps, image.size
 
 
 def normalize_group(
@@ -294,7 +414,10 @@ def render_popup(
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base", type=Path, required=True)
-    parser.add_argument("--media-dir", type=Path, required=True)
+    parser.add_argument("--media-dir", type=Path)
+    parser.add_argument("--photo-dir", type=Path)
+    parser.add_argument("--photo-list", type=Path)
+    parser.add_argument("--project-config", type=Path, help="内含视频片段和照片设置的运行配置")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--activity-start", help="活动本地开始时间；默认读取 track-json")
     parser.add_argument("--activity-end", help="活动本地结束时间；默认读取 track-json")
@@ -303,7 +426,10 @@ def main() -> None:
     parser.add_argument("--base-seconds", type=float, default=60.0)
     parser.add_argument("--group-window", type=int, default=600)
     parser.add_argument("--per-clip-seconds", type=float, default=3.0)
-    parser.add_argument("--segment-list", type=Path, help="精选片段 TXT；未写时间码的条目使用整个视频")
+    parser.add_argument(
+        "--segment-list", type=Path,
+        help="精选片段 JSON",
+    )
     parser.add_argument("--skip-invalid", action="store_true", help="跳过清单中的错误行并继续生成")
     parser.add_argument("--groups", default="", help="1-based group indices, e.g. 1,9,17; empty means all")
     parser.add_argument("--fps", type=int, default=30)
@@ -321,6 +447,21 @@ def main() -> None:
     )
     parser.add_argument("--report", type=Path, default=Path("output/media-events.json"))
     args = parser.parse_args()
+    project_media = {}
+    if args.project_config:
+        project_media = json.loads(args.project_config.read_text(encoding="utf-8")).get("media", {})
+    inline_segments = project_media.get("segments", [])
+    inline_photos = project_media.get("photos", [])
+    if not isinstance(inline_segments, list) or not isinstance(inline_photos, list):
+        parser.error("project media segments/photos must be arrays")
+    if inline_photos and not args.photo_dir:
+        parser.error("--photo-dir is required for project photos")
+    if not inline_photos and bool(args.photo_dir) != bool(args.photo_list):
+        parser.error("--photo-dir and --photo-list must be supplied together")
+    if (inline_segments or args.segment_list) and not args.media_dir:
+        parser.error("--media-dir is required for video composition")
+    if not args.media_dir and not args.photo_dir:
+        parser.error("at least one video or photo source is required")
     args.popup_width = max(2, round(args.popup_width / 2) * 2)
     args.popup_height = max(2, round(args.popup_height / 2) * 2)
 
@@ -332,51 +473,79 @@ def main() -> None:
     activity_start = local_wall_time(args.activity_start or track_metadata["start"])
     activity_end = local_wall_time(args.activity_end or track_metadata["end"])
     base_width, base_height = video_geometry(args.base)
-    activity_duration = (activity_end - activity_start).total_seconds()
     validation_errors = []
     validation_warnings = []
-    if args.segment_list:
+    groups = []
+    clip_limit = args.per_clip_seconds
+    if inline_segments:
+        configured = []
+        try:
+            for item in inline_segments:
+                segment = Segment(
+                    item["file"], float(item["start_seconds"]), float(item["end_seconds"]),
+                    item.get("creation_time"),
+                )
+                segment.validate()
+                configured.append(segment)
+        except (KeyError, TypeError, ValueError) as exc:
+            validation_errors.append(f"项目中的视频片段无效: {exc}")
+        if not validation_errors:
+            segments, errors, warnings = load_configured_segments(configured, args.media_dir)
+            validation_errors.extend(errors)
+            validation_warnings.extend(warnings)
+            groups = group_segments(segments, args.group_window)
+            clip_limit = None
+    elif args.segment_list:
         segments, validation_errors, validation_warnings = load_segment_list(args.segment_list, args.media_dir)
-        if validation_errors and not args.skip_invalid:
-            raise SystemExit("清单校验失败:\n" + "\n".join(f"- {error}" for error in validation_errors))
-        if not segments:
-            raise SystemExit("清单中没有可用的视频片段")
         groups = group_segments(segments, args.group_window)
         clip_limit = None
-    else:
+    elif args.media_dir:
         groups = matched_groups(args.media_dir, activity_start, activity_end, args.group_window)
-        clip_limit = args.per_clip_seconds
+    photos = []
+    if inline_photos:
+        try:
+            configured_photos = [PhotoEvent(**item) for item in inline_photos]
+            for event in configured_photos:
+                event.validate()
+            photos, errors, warnings = load_configured_photos(
+                configured_photos, args.photo_dir, activity_start, activity_end
+            )
+            validation_errors.extend(errors)
+            validation_warnings.extend(warnings)
+        except (TypeError, ValueError) as exc:
+            validation_errors.append(f"项目中的照片设置无效: {exc}")
+    elif args.photo_list:
+        try:
+            photos, errors, warnings = load_photos(
+                args.photo_list, args.photo_dir, activity_start, activity_end
+            )
+            validation_errors.extend(errors)
+            validation_warnings.extend(warnings)
+        except (OSError, ValueError) as exc:
+            validation_errors.append(str(exc))
+    if validation_errors and not args.skip_invalid:
+        raise SystemExit("清单校验失败 / Media validation failed:\n" +
+                         "\n".join(f"- {error}" for error in validation_errors))
+    if (inline_segments or args.segment_list) and not groups and not (inline_photos or args.photo_list):
+        raise SystemExit("清单中没有可用的视频片段")
     selected_indices = (
         [int(value) for value in args.groups.split(",") if value.strip()]
         if args.groups else list(range(1, len(groups) + 1))
     )
     selected = [(index, groups[index - 1]) for index in selected_indices]
+    if not selected:
+        for photo in photos:
+            if photo["placement"] == "end":
+                validation_warnings.append(
+                    f"{photo['path'].name}: 没有可接续的影片片段，已跳过 / No selected video clip to follow, skipped"
+                )
+    for warning in validation_warnings:
+        print(warning, flush=True)
 
-    events = []
-    for index, group in selected:
-        activity_offset = (group[0]["created"] - activity_start).total_seconds()
-        track_progress = max(0.0, min(1.0, activity_offset / activity_duration))
-        intro_ratio = float(render_config.get("intro_ratio", 0.07))
-        outro_ratio = float(render_config.get("outro_ratio", 0.07))
-        track_ratio = max(0.001, 1.0 - intro_ratio - outro_ratio)
-        base_time = args.base_seconds * (intro_ratio + track_ratio * track_progress)
-        events.append({
-            "group": index,
-            "created": group[0]["created"].isoformat(),
-            "base_time": base_time,
-            "files": [str(item["path"]) for item in group],
-            "segments": [
-                {
-                    "file": item["path"].name,
-                    "start": item.get("start", 0.0),
-                    "end": item.get("end", item["duration"]),
-                    "duration": item["duration"],
-                    "section": item.get("section", ""),
-                    "line": item.get("line"),
-                }
-                for item in group
-            ],
-        })
+    planned = plan_media_events(
+        selected, photos, activity_start, activity_end, args.base_seconds, render_config, args.fps
+    )
+    events = [event for event, _ in planned]
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.report.parent.mkdir(parents=True, exist_ok=True)
@@ -384,28 +553,40 @@ def main() -> None:
         temp = Path(temporary)
         timeline_parts = []
         previous_base_time = 0.0
-        for event_number, (event, (_group_index, group)) in enumerate(zip(events, selected), 1):
-            map_segment = temp / f"{len(timeline_parts):03d}_map.mp4"
-            render_map_segment(args.base, previous_base_time, event["base_time"], map_segment, args.fps)
-            timeline_parts.append(map_segment)
+        inserted_seconds = 0.0
+        for event_number, (event, group) in enumerate(planned, 1):
+            if event["base_time"] - previous_base_time >= 0.5 / args.fps:
+                map_segment = temp / f"{len(timeline_parts):03d}_map.mp4"
+                render_map_segment(args.base, previous_base_time, event["base_time"], map_segment, args.fps)
+                timeline_parts.append(map_segment)
 
-            normalized = temp / f"group_{event_number:03d}.mp4"
-            source_width, source_height = video_geometry(group[0]["path"])
-            popup_width, popup_height = fit_popup_geometry(
-                source_width, source_height, args.popup_width, args.popup_height
-            )
+            normalized = temp / f"media_{event_number:03d}.mp4"
+            is_photo = event["type"] == "photo"
+            if is_photo:
+                popup_width, popup_height = args.popup_width, args.popup_height
+                try:
+                    duration, (source_width, source_height) = normalize_photo(
+                        group[0], normalized, args.fps, popup_width, popup_height
+                    )
+                except PHOTO_READ_ERRORS as exc:
+                    raise SystemExit(f"{event['file']}: {exc}") from exc
+            else:
+                source_width, source_height = video_geometry(group[0]["path"])
+                popup_width, popup_height = fit_popup_geometry(
+                    source_width, source_height, args.popup_width, args.popup_height
+                )
+                duration = normalize_group(group, normalized, clip_limit, args.fps, popup_width, popup_height)
             event["source_geometry"] = [source_width, source_height]
             event["popup_geometry"] = [popup_width, popup_height]
-            event["popup_duration"] = normalize_group(
-                group, normalized, clip_limit, args.fps, popup_width, popup_height
-            )
+            event["popup_duration"] = duration
+            event["output_time"] = event["base_time"] + inserted_seconds
             popup = temp / f"{len(timeline_parts):03d}_popup.mp4"
             next_base_time = (
                 events[event_number]["base_time"]
                 if event_number < len(events) else args.base_seconds
             )
             available_advance = max(0.0, next_base_time - event["base_time"])
-            event["background_advance"] = available_advance * max(
+            event["background_advance"] = 0.0 if is_photo else available_advance * max(
                 0.0, min(1.0, args.popup_background_advance)
             )
             render_popup(
@@ -416,15 +597,18 @@ def main() -> None:
             )
             timeline_parts.append(popup)
             previous_base_time = event["base_time"] + event["background_advance"]
+            inserted_seconds += duration - event["background_advance"]
+            label = event["file"] if is_photo else f"组 {event['group']} · {len(group)} 段"
             print(
-                f"事件 {event_number}/{len(events)}: 组 {event['group']} · "
-                f"{len(group)} 段 · {event['popup_duration']:.1f}s · 地图 {event['base_time']:.2f}s",
+                f"事件 {event_number}/{len(events)}: {label} · "
+                f"{duration:.1f}s · 地图 {event['base_time']:.2f}s",
                 flush=True,
             )
 
-        final_map = temp / f"{len(timeline_parts):03d}_map.mp4"
-        render_map_segment(args.base, previous_base_time, args.base_seconds, final_map, args.fps)
-        timeline_parts.append(final_map)
+        if args.base_seconds - previous_base_time >= 0.5 / args.fps:
+            final_map = temp / f"{len(timeline_parts):03d}_map.mp4"
+            render_map_segment(args.base, previous_base_time, args.base_seconds, final_map, args.fps)
+            timeline_parts.append(final_map)
         concat_file = temp / "concat.txt"
         concat_file.write_text(
             "".join(f"file '{part.as_posix()}'\n" for part in timeline_parts), encoding="utf-8"
@@ -457,7 +641,9 @@ def main() -> None:
         "validation_warnings": validation_warnings,
         "matched_clip_count": sum(len(group) for group in groups),
         "all_group_count": len(groups),
-        "selected_group_count": len(events),
+        "selected_group_count": len(selected),
+        "photo_list": str(args.photo_list) if args.photo_list else None,
+        "matched_photo_count": sum(event["type"] == "photo" for event in events),
         "events": events,
     }
     args.report.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")

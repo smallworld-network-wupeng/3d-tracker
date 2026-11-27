@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 from datetime import datetime
@@ -28,11 +29,15 @@ class ComposeMediaVideoTests(unittest.TestCase):
             root = Path(temporary)
             video = root / "insta360.MP4"
             video.touch()
-            segment_list = root / "video_segments.txt"
-            segment_list.write_text(
-                "insta360.MP4 | 00:00:02 | 00:00:08 | 2026-08-23T08:12:35\n",
-                encoding="utf-8",
-            )
+            segment_list = root / "video_segments.json"
+            segment_list.write_text(json.dumps({
+                "schema_version": 1,
+                "videos": [{
+                    "file": "insta360.MP4",
+                    "creation_time": "2026-08-23T08:12:35",
+                    "segments": [{"start_seconds": 2, "end_seconds": 8}],
+                }],
+            }), encoding="utf-8")
             with patch(
                 "compose_media_video.probe",
                 return_value={"path": video, "created": None, "duration": 10.0},

@@ -221,6 +221,7 @@ def render(args) -> None:
         args.simplify_meters, args.name,
     )
     browser_config = {
+        "fps": args.fps,
         "terrain_exaggeration": args.terrain_exaggeration,
         "imagery_margin_deg": args.imagery_margin_deg,
         "intro_ratio": args.intro_ratio,

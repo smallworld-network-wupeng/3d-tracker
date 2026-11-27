@@ -28,8 +28,12 @@
 
 1. 在 **活动信息** 中点击「选择文件」导入轨迹。活动名称默认取自文件名，可以修改。推荐使用 FIT，文件中有记录时可显示心率、海拔和实时配速。
 2. 在 **影片设置** 中选横屏或竖屏、720P 或 1080P，再选影片时长。镜头距离会根据路线跨度、海拔和画幅自动调整。
-3. 可以在 **素材** 中选择实拍影片文件夹，再点「编辑影片片段」。在弹窗里播放影片并标记起点和终点，同一个文件可以选多段。还可以修正拍摄时间，便于与轨迹对齐。修正会保存在 `video_segments.txt` 中。背景音乐也在这一区选择。
-4. 在 **输出** 中选好保存位置，点「生成影片」导出含所选素材的完整 MP4。生成完成后可点「打开影片」。
+3. 可以在 **素材** 中选择实拍影片文件夹，再点「编辑影片片段」。在弹窗里播放影片并标记起点和终点，同一个文件可以选多段。还可以修正拍摄时间，便于与轨迹对齐。背景音乐也在这一区选择，可设置影片开始后延迟多少秒播放。
+4. 在 **素材** 中选择照片文件夹并点「编辑照片」。支持 JPG、JPEG、PNG、HEIC 和 HEIF。勾选要加入的照片，检查或修改 EXIF 拍摄时间，也可批量勾选活动时间内的照片。到达对应轨迹位置时，地图会暂停，照片默认显示 5 秒，再继续播放。活动时间外的照片可勾选「接在最后一个影片片段后」，它会紧接在最后播放的已选影片片段后，显示结束后继续轨迹。
+5. 点击主窗口底部的「保存项目」保存 `.3dtrack` 文件。下次启动后点击同一位置的「打开项目…」（或按 `Ctrl/Cmd+O`），选择保存的项目文件即可继续编辑。轨迹、素材路径、视频剪辑、照片设置、音乐和影片参数都会保存在这一个项目文件中。项目目录内的素材使用相对路径，整个目录可以一起移动。
+6. 在 **输出** 中选好保存位置，再点「生成影片」。程序会先保存项目，再导出 MP4。项目首次保存时需要选择文件位置。生成完成后可点「打开影片」。
+
+照片拍摄时间统一以北京时间显示。带 EXIF 时区的照片会自动换算，缺少时区的照片可在编辑器里批量偏移，缺少拍摄时间的照片可手动填写。照片文件夹只扫描当前一层。
 
 第一次试用时，可以在「轨迹文件」中选择仓库自带的 [合成 KML 示例](examples/synthetic-track.kml)。
 
@@ -72,8 +76,10 @@ The desktop interface starts in Chinese or English based on your system language
 
 1. In **Activity**, click **Choose File** to import a FIT or Garmin-style KML file. You can try the bundled [synthetic KML track](examples/synthetic-track.kml). FIT recordings can also supply elevation, heart rate, and recorded pace when available.
 2. In **Movie Settings**, choose landscape or portrait, a duration, and 720p or 1080p. The camera adjusts automatically to the route and frame.
-3. In **Media**, you can choose a folder of footage and click **Edit Video Clips** to mark in and out points and align clips to the route by recording time. You can also choose background music.
-4. In **Output**, choose a destination and click **Generate Movie**. When it finishes, click **Open Movie** to watch the MP4.
+3. In **Media**, you can choose a folder of footage and click **Edit Video Clips** to mark in and out points and align clips to the route by recording time. You can also choose background music and set how many seconds after the movie starts it should begin playing.
+4. In **Media**, choose a photo folder and click **Edit Photos**. Check the JPEG, PNG, HEIC, or HEIF photos to include. Confirm or edit their EXIF capture times, shown in UTC+08. At each matching route position, the map pauses for the photo's display duration (5 seconds by default). Select **After Last Video Clip** to show a photo as soon as the last selected video clip finishes, then resume the route.
+5. Click **Save Project** at the bottom of the main window to save a `.3dtrack` file. On a later launch, click **Open Project…** beside it (or press `Ctrl/Cmd+O`) and select the saved file to continue editing. The one project file contains the track and media paths, video clips, photo settings, music, and movie settings. Media inside the project directory uses relative paths so the directory can be moved as a unit.
+6. In **Output**, choose a destination and click **Generate Movie**. The app saves the project before exporting the MP4 and asks for the project file location on the first save. When generation finishes, click **Open Movie** to watch the MP4.
 
 The app reads track files locally. The first render for an uncached area needs internet access to fetch terrain and imagery tiles for the area covered by the route.
 

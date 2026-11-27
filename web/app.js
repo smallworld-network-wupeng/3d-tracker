@@ -18,6 +18,8 @@
   const TERRAIN_EXAGGERATION = setting("terrain_exaggeration", 1.35);
   const INTRO_RATIO = setting("intro_ratio", 0.07);
   const OUTRO_RATIO = setting("outro_ratio", 0.07);
+  const OUTRO_EFFECT_SECONDS = 3.6;
+  const RENDER_FPS = setting("fps", 30);
   const CAMERA_PITCH_DEG = setting("camera_pitch_deg", -57);
   const CAMERA_RANGE_M = setting("camera_range_m", 9500);
   const AUTO_CAMERA_RANGE = renderConfig.auto_camera_range !== false;
@@ -153,6 +155,28 @@
   const reportedDistance = metadata.reported_distance_km || metadata.distance_m / 1000;
   const reportedGain = metadata.reported_gain_m || metadata.max_altitude_m - metadata.min_altitude_m;
   $("introSummary").textContent = `${reportedDistance.toFixed(1)} KM  ·  ${metadata.reported_duration || formatDuration(metadata.duration_seconds)}  ·  +${Math.round(reportedGain)} M`;
+  const outro = $("outro");
+  const activityHud = $("activityHud");
+  const totalDistanceKm = metadata.reported_distance_km ?? metadata.distance_m / 1000;
+  const totalSeconds = metadata.reported_duration_seconds ?? (metadata.reported_duration
+    ? metadata.reported_duration.split(":").reduce((seconds, part) => seconds * 60 + Number(part), 0)
+    : metadata.duration_seconds);
+  const paceSeconds = totalDistanceKm > 0 && totalSeconds > 0 ? Math.round(totalSeconds / totalDistanceKm) : null;
+  const formattedPace = paceSeconds === null ? null
+    : `${Math.floor(paceSeconds / 60)}:${String(paceSeconds % 60).padStart(2, "0")}`;
+  const formattedGain = Number.isFinite(metadata.reported_gain_m) ? Math.round(metadata.reported_gain_m).toLocaleString("en-US") : null;
+  $("outroActivityName").textContent = metadata.name;
+  for (const [id, value] of [
+    ["outroDistance", totalDistanceKm.toFixed(2)],
+    ["outroHeartRate", metadata.avg_heart_rate],
+    ["outroPace", formattedPace],
+    ["outroDuration", metadata.reported_duration || formatDuration(totalSeconds)],
+    ["outroGain", formattedGain],
+  ]) {
+    const element = $(id);
+    element.textContent = value ?? "—";
+    if (element.nextElementSibling) element.nextElementSibling.hidden = value == null;
+  }
   const profileCanvas = $("elevationProfile");
   const profileContext = profileCanvas.getContext("2d");
 
@@ -458,6 +482,35 @@
     return range;
   }
 
+  function updateOutro(frameNumber, totalFrames) {
+    // Fit the effect into the tail of the existing camera orbit, including short previews.
+    const effectFrames = Math.min((totalFrames - 1) * OUTRO_RATIO, OUTRO_EFFECT_SECONDS * RENDER_FPS);
+    const progress = effectFrames > 0 ? 1 - (totalFrames - 1 - frameNumber) / effectFrames : 0;
+    if (progress <= 0) {
+      if (!outro.hidden) {
+        outro.hidden = true;
+        activityHud.style.opacity = "";
+      }
+      return;
+    }
+
+    const smoothStep = (value) => {
+      const p = Cesium.Math.clamp(value, 0, 1);
+      return p * p * (3 - 2 * p);
+    };
+    const defocus = smoothStep((progress - 0.10) / 0.36);
+    const rise = Cesium.Math.clamp((progress - 0.29) / 0.13, 0, 1);
+    const rebound = smoothStep((progress - 0.42) / 0.06);
+    const cardShift = 114 * (1 - rise) ** 3 - 2 * (1 - rebound);
+
+    outro.hidden = false;
+    outro.style.setProperty("--outro-blur", `${defocus * 1.8}rem`);
+    outro.style.setProperty("--outro-shade", defocus * 0.83);
+    outro.style.setProperty("--outro-card-opacity", smoothStep((progress - 0.29) / 0.052));
+    outro.style.setProperty("--outro-card-shift", `${cardShift}vh`);
+    activityHud.style.opacity = 1 - smoothStep((progress - 0.08) / 0.25);
+  }
+
   async function settleTerrain(maxFrames = 16) {
     for (let frame = 0; frame < maxFrames; frame += 1) {
       viewer.scene.requestRender();
@@ -520,6 +573,7 @@
     $("titleCard").style.opacity = videoProgress < INTRO_RATIO ? "1" : "0";
     $("elevationPanel").style.opacity = videoProgress < INTRO_RATIO ? "0" : "1";
     $("liveMetrics").style.opacity = videoProgress < INTRO_RATIO ? "0" : "1";
+    updateOutro(frameNumber, totalFrames);
     drawElevationProfile(distanceProgress, sample.point);
     await settleTerrain(1);
     drawRouteOverlay(sample.lowerIndex, sample.position);
