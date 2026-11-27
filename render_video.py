@@ -34,6 +34,14 @@ WEB_ROOT = WORK_ROOT / "web"
 
 
 class StaticHandler(http.server.SimpleHTTPRequestHandler):
+    extensions_map = {
+        **http.server.SimpleHTTPRequestHandler.extensions_map,
+        ".js": "text/javascript",
+        ".wasm": "application/wasm",
+        ".css": "text/css",
+        ".json": "application/json",
+    }
+
     def translate_path(self, path: str) -> str:
         relative = urlparse(path).path.lstrip("/")
         if relative.startswith("cesium/"):
@@ -287,15 +295,18 @@ def render(args) -> None:
             browser_flags.append("--enable-unsafe-swiftshader")
             if os.environ.get("THREED_TRACKER_SOFTWARE_WEBGL") == "1":
                 browser_flags.append("--use-angle=swiftshader")
-        chrome = subprocess.Popen([
-            find_chrome(), "--headless=new", f"--remote-debugging-port={chrome_port}",
-            f"--user-data-dir={temp_path / 'chrome'}", "--remote-allow-origins=*",
-            "--hide-scrollbars", "--mute-audio", "--no-first-run", "--no-default-browser-check",
-            "--disable-background-timer-throttling", "--disable-renderer-backgrounding",
-            "--disable-backgrounding-occluded-windows",
-            *browser_flags,
-            f"--window-size={args.width},{args.height}", "about:blank",
-        ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        browser_log_path = temp_path / "chromium.log"
+        browser_flags.extend(("--enable-logging=stderr", "--log-level=1"))
+        with browser_log_path.open("wb") as browser_log:
+            chrome = subprocess.Popen([
+                find_chrome(), "--headless=new", f"--remote-debugging-port={chrome_port}",
+                f"--user-data-dir={temp_path / 'chrome'}", "--remote-allow-origins=*",
+                "--hide-scrollbars", "--mute-audio", "--no-first-run", "--no-default-browser-check",
+                "--disable-background-timer-throttling", "--disable-renderer-backgrounding",
+                "--disable-backgrounding-occluded-windows",
+                *browser_flags,
+                f"--window-size={args.width},{args.height}", "about:blank",
+            ], stdout=subprocess.DEVNULL, stderr=browser_log)
         cdp = None
         try:
             targets = wait_json(f"http://127.0.0.1:{chrome_port}/json/list")
@@ -303,11 +314,15 @@ def render(args) -> None:
             cdp = CDP(page["webSocketDebuggerUrl"])
             cdp.call("Page.enable")
             cdp.call("Runtime.enable")
+            cdp.call("Page.bringToFront")
             cdp.call("Emulation.setDeviceMetricsOverride", {
                 "width": args.width, "height": args.height, "deviceScaleFactor": 1, "mobile": False,
             })
-            cdp.call("Page.navigate", {"url": f"http://127.0.0.1:{server_port}/index.html"})
-            deadline = time.monotonic() + 45
+            navigation = cdp.call("Page.navigate", {"url": f"http://127.0.0.1:{server_port}/index.html"})
+            if navigation.get("errorText"):
+                raise RuntimeError(f"Chromium 无法打开本地渲染页面: {navigation['errorText']}")
+            startup_seconds = 90 if sys.platform == "win32" else 45
+            deadline = time.monotonic() + startup_seconds
             while time.monotonic() < deadline:
                 error = evaluate(cdp, "window.__TRACK_ERROR__ || null")
                 if error:
@@ -319,7 +334,15 @@ def render(args) -> None:
                     break
                 time.sleep(0.1)
             else:
-                raise TimeoutError("Cesium 页面 45 秒内未就绪")
+                state = evaluate(cdp, """({
+                    page: document.readyState,
+                    visibility: document.visibilityState,
+                    cesium: typeof Cesium,
+                    renderer: typeof window.renderFrame,
+                    camera: Boolean(window.__CAMERA_FIT__),
+                    resources: performance.getEntriesByType('resource').length
+                })""")
+                raise TimeoutError(f"Cesium 页面 {startup_seconds} 秒内未就绪: {state}")
             terrain_tiles = evaluate(cdp, "window.__TERRAIN_TILE_COUNT__ || 0")
             print(f"Cesium 已解码地形瓦片: {terrain_tiles}", flush=True)
 
@@ -343,6 +366,11 @@ def render(args) -> None:
                 "-c:v", "libx264", "-preset", args.preset, "-color_range", "tv",
                 "-crf", str(args.crf), "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(output),
             ], check=True)
+        except Exception:
+            browser_lines = browser_log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+            if browser_lines:
+                print("\n".join(browser_lines[-18:]), file=sys.stderr, flush=True)
+            raise
         finally:
             if cdp:
                 cdp.close()

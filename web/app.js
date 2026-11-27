@@ -515,7 +515,18 @@
     for (let frame = 0; frame < maxFrames; frame += 1) {
       viewer.scene.requestRender();
       viewer.scene.render();
-      await new Promise((resolve) => requestAnimationFrame(resolve));
+      // A headless Windows session may stop delivering compositor ticks.
+      // Rendering above is explicit; still give tile workers time to report progress.
+      await new Promise((resolve) => {
+        const animation = requestAnimationFrame(() => {
+          clearTimeout(timeout);
+          resolve();
+        });
+        const timeout = setTimeout(() => {
+          cancelAnimationFrame(animation);
+          resolve();
+        }, 75);
+      });
       if (viewer.scene.globe.tilesLoaded && frame > 1) return;
     }
   }
