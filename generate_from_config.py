@@ -9,7 +9,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from runtime_paths import IS_BUNDLED, RESOURCE_ROOT, WORK_ROOT, configure_runtime_environment
+from runtime_paths import IS_BUNDLED, RESOURCE_ROOT, WORK_ROOT, configure_runtime_environment, render_worker_executable
 
 
 configure_runtime_environment()
@@ -44,7 +44,7 @@ def main() -> None:
 
     def entrypoint(script: str, bundled_flag: str) -> list[str]:
         if IS_BUNDLED:
-            return [sys.executable, bundled_flag]
+            return [render_worker_executable(), bundled_flag]
         return [python, str(ROOT / script)]
 
     render_command = [*entrypoint("render_video.py", "--render-video"), str(track["file"]), "-o", str(render["output"])]

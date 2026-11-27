@@ -1,0 +1,127 @@
+name: Windows x64 release
+run-name: Windows x64 ${{ inputs.tag }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: New release tag (vMAJOR.MINOR.PATCH)
+        required: true
+        default: v0.1.1
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-release-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.ref == 'refs/heads/main'
+    runs-on: windows-latest
+    timeout-minutes: 40
+    env:
+      RELEASE_TAG: ${{ inputs.tag }}
+    steps:
+      - name: Validate the release tag
+        shell: pwsh
+        run: |
+          if ($env:RELEASE_TAG -cnotmatch '^v[0-9]+\.[0-9]+\.[0-9]+$') { throw 'Expected vMAJOR.MINOR.PATCH.' }
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+          architecture: x64
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Install dependencies and run unit tests
+        run: |
+          python -m pip install -r requirements.txt PySide6==6.10.3 "fitdecode==0.11.0" "Pillow==11.3.0" "pillow-heif==1.1.1" tzdata PyInstaller==6.22.3
+          npm ci --no-audit --no-fund
+          python -m unittest discover -s tests -v
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            curl make diffutils tar gzip
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-nasm
+            mingw-w64-ucrt-x86_64-pkgconf
+      - name: Build FFmpeg and ffprobe with libx264
+        shell: msys2 {0}
+        run: bash scripts/build_windows_ffmpeg.sh
+      - name: Build the portable Windows ZIP and the third-party source ZIP
+        run: ./scripts/build_windows_release.ps1 -Tag $env:RELEASE_TAG
+      - name: Export and verify a video from the extracted ZIP
+        run: ./scripts/test_windows_release.ps1 -Tag $env:RELEASE_TAG
+      - uses: actions/upload-artifact@v7
+        with:
+          name: tested-windows-release
+          path: release/windows/*.zip
+          if-no-files-found: error
+          compression-level: 0
+          overwrite: true
+          retention-days: 1
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ inputs.tag }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: tested-windows-release
+      - name: Publish the tested Windows assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          app="3D-Tracker-$version-windows-x64.zip"
+          sources="3D-Tracker-$version-windows-third-party-source.zip"
+          test -s "$app"
+          test -s "$sources"
+          app_sha=$(sha256sum "$app" | cut -d' ' -f1)
+          sources_sha=$(sha256sum "$sources" | cut -d' ' -f1)
+
+          if existing_tag=$(gh api "repos/$GH_REPO/commits/$RELEASE_TAG" --jq .sha 2>/dev/null); then
+            test "$existing_tag" = "$GITHUB_SHA"
+          fi
+          if ! gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft; then
+            notes="Windows x64 免安装预览版。完整解压 ZIP，打开 3D Tracker.exe。在活动信息中选择 examples/synthetic-track.kml，设置 720P、时长和输出目录，再点生成影片。
+
+          Portable Windows x64 preview. Extract the entire ZIP and run 3D Tracker.exe. Chromium, FFmpeg, and the Python runtime are bundled. See the README for the bilingual guide. The first render in a new area needs internet access to fetch map tiles.
+
+          Verified on the GitHub Actions Windows runner by exporting a 4-second, 60-frame, 1280 × 720 H.264 MP4 from the extracted ZIP.
+
+          Installation ZIP SHA-256: $app_sha
+          Third-party source ZIP SHA-256: $sources_sha"
+            gh release create "$RELEASE_TAG" --target "$GITHUB_SHA" --draft --prerelease \
+              --title "3D Tracker $RELEASE_TAG · Windows x64 Preview" --notes "$notes"
+          fi
+
+          test "$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)" = true
+          test "$(gh release view "$RELEASE_TAG" --json targetCommitish --jq .targetCommitish)" = "$GITHUB_SHA"
+          for asset in "$app" "$sources"; do
+            if ! gh release view "$RELEASE_TAG" --json assets --jq '.assets[].name' | grep -Fxq "$asset"; then
+              gh release upload "$RELEASE_TAG" "$asset"
+            fi
+          done
+          id=$(gh release view "$RELEASE_TAG" --json databaseId --jq .databaseId)
+          remote_assets=$(gh api "repos/$GH_REPO/releases/$id/assets")
+          for asset in "$app" "$sources"; do
+            expected=$(sha256sum "$asset" | cut -d' ' -f1)
+            actual=$(jq -r --arg name "$asset" '.[] | select(.name == $name and .state == "uploaded") | .digest' <<< "$remote_assets")
+            test "$actual" = "sha256:$expected"
+          done
+          gh release edit "$RELEASE_TAG" --draft=false

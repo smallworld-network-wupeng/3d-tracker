@@ -13,6 +13,7 @@ import shutil
 import socket
 import struct
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -280,12 +281,19 @@ def render(args) -> None:
         temp_path = Path(temp)
         frames = temp_path / "frames"
         frames.mkdir()
+        browser_flags = []
+        if sys.platform == "win32":
+            # Allow WebGL on machines where the driver cannot provide it.
+            browser_flags.append("--enable-unsafe-swiftshader")
+            if os.environ.get("THREED_TRACKER_SOFTWARE_WEBGL") == "1":
+                browser_flags.append("--use-angle=swiftshader")
         chrome = subprocess.Popen([
             find_chrome(), "--headless=new", f"--remote-debugging-port={chrome_port}",
             f"--user-data-dir={temp_path / 'chrome'}", "--remote-allow-origins=*",
             "--hide-scrollbars", "--mute-audio", "--no-first-run", "--no-default-browser-check",
             "--disable-background-timer-throttling", "--disable-renderer-backgrounding",
             "--disable-backgrounding-occluded-windows",
+            *browser_flags,
             f"--window-size={args.width},{args.height}", "about:blank",
         ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         cdp = None

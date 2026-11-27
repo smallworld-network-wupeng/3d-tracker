@@ -84,6 +84,7 @@ from runtime_paths import (
     WORK_ROOT,
     configure_runtime_environment,
     default_output_directory,
+    render_worker_executable,
 )
 
 
@@ -1571,7 +1572,7 @@ class MainWindow(QMainWindow):
         arguments = ["--generate-from-config", str(config_path)] if IS_BUNDLED else [
             str(ROOT / "generate_from_config.py"), str(config_path)
         ]
-        self.process.start(sys.executable, arguments)
+        self.process.start(render_worker_executable(), arguments)
 
     def _read_process_output(self) -> None:
         if not self.process or not self.progress_dialog:
@@ -1698,6 +1699,10 @@ if __name__ == "__main__":
     }
     command = sys.argv[1] if len(sys.argv) > 1 else None
     if IS_BUNDLED and command in bundled_commands:
+        # Windows pipes can default to a legacy code page instead of UTF-8.
+        for stream in (sys.stdout, sys.stderr):
+            if stream is not None:
+                stream.reconfigure(encoding="utf-8", errors="replace")
         module_name, function_name = bundled_commands[command]
         sys.argv = [sys.argv[0], *sys.argv[2:]]
         module = __import__(module_name)
