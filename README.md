@@ -4,7 +4,7 @@
 
 3D Tracker is an open-source desktop app for turning FIT and Garmin-style KML activity tracks into 3D route videos. Animate your route over terrain and satellite imagery, sync real footage by recording time, add music, and export a 720p or 1080p MP4 in landscape or portrait format.
 
-[下载 macOS 版](#下载并安装-macos-版) · [中文使用说明](#界面怎么用) · [English quick start](#english-quick-start)
+[下载 macOS 版](#下载并安装-macos-版) · [下载 Windows 版](#下载并运行-windows-版) · [中文使用说明](#界面怎么用) · [English quick start](#english-quick-start)
 
 ## 下载并安装 macOS 版
 
@@ -15,6 +15,16 @@
 3. 此预览版使用临时签名，尚未经过 Apple 公证。如果 macOS 提示无法验证开发者，请先核对发布页上的 SHA-256，再参考 [Apple 的首次打开说明](https://support.apple.com/zh-cn/102445)。
 
 初次试用可下载 [合成 KML 示例](https://raw.githubusercontent.com/smallworld-network-wupeng/3d-tracker/v0.1.0/examples/synthetic-track.kml)，在「活动信息」中导入。选 720P、设置时长和输出文件夹，再点「生成影片」。首次渲染新区域时需要联网下载地形和影像。
+
+## 下载并运行 Windows 版
+
+适用于 **Windows 10 或 11 x64**。ZIP 内已包含 Python、PySide6、CesiumJS、Chromium、FFmpeg 和照片处理依赖。
+
+1. 在 [GitHub Releases](https://github.com/smallworld-network-wupeng/3d-tracker/releases) 找到 Windows x64 预览版，从 **Assets** 下载文件名以 `-windows-x64.zip` 结尾的安装包。
+2. 右键 ZIP，选择「全部解压缩」。打开解压出的 **3D Tracker** 文件夹，双击 **3D Tracker.exe**，并保留同目录的文件和文件夹。
+3. 在「活动信息」中选择自带的 `examples/synthetic-track.kml` 或自己的 FIT/KML，选好画质、时长和输出文件夹，再点「生成影片」。首次保存会要求选择 `.3dtrack` 项目文件的位置。生成结束后点「打开影片」。
+
+首次渲染新区域需联网下载地形和影像。Windows 预览版未做代码签名，SmartScreen 可能会提示无法验证发布者。下载后可用 PowerShell 的 `Get-FileHash -Algorithm SHA256` 核对发布页上的 SHA-256。
 
 ## 成片演示 / Demo
 
@@ -69,6 +79,8 @@ npm.cmd ci
 ## English quick start
 
 The desktop preview runs on **Apple Silicon Macs with macOS 26 or later**. Download `3D-Tracker-0.1.0-macOS-arm64.zip` (about 236 MB) under **Assets** for `v0.1.0` in [GitHub Releases](https://github.com/smallworld-network-wupeng/3d-tracker/releases). Unzip it, move **3D Tracker.app** to Applications, then open it. The preview is ad-hoc signed and is not notarized. If macOS cannot verify the developer, check the release's SHA-256 and refer to [Apple's first-launch instructions](https://support.apple.com/en-us/102445).
+
+On **Windows 10 or 11 x64**, download the `-windows-x64.zip` asset from the Windows preview in [GitHub Releases](https://github.com/smallworld-network-wupeng/3d-tracker/releases). Choose **Extract All**, open the extracted **3D Tracker** folder, then start **3D Tracker.exe**. Keep the folder together. The included `examples/synthetic-track.kml` is ready to try. The Windows preview is unsigned. Check the release's SHA-256 if SmartScreen cannot verify its publisher.
 
 To run from source, follow the [source installation instructions](#从源码安装并启动-gui).
 
